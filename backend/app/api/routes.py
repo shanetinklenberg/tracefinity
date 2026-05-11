@@ -152,10 +152,6 @@ def _get_tracer(tracer_id: str | None = None) -> AITracer:
             )
     return _tracers[tid]
 
-# pre-load all configured tracers at startup
-for _tid in settings.available_tracers:
-    _get_tracer(_tid)
-
 polygon_scaler = PolygonScaler()
 stl_generator = ManifoldSTLGenerator()
 
@@ -488,6 +484,7 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
 TRACER_LABELS = {
     "gemini": "Gemini API",
     "inspyrenet": "InSPyReNet",
+    "birefnet-general": "BiRefNet General",
     "birefnet-lite": "BiRefNet Lite",
     "isnet": "IS-Net",
 }
