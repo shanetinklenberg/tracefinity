@@ -8,6 +8,7 @@ Tool tracing app that generates 3D-printable gridfinity bins from photos. Backen
 - [docs/api.md](docs/api.md) -- all API endpoints
 - [docs/stl-generation.md](docs/stl-generation.md) -- STL geometry, gridfinity constants, splitting
 - [docs/gotchas.md](docs/gotchas.md) -- Y-axis inversion, memory leaks, Docker, hard-won lessons
+- [DESIGN.md](DESIGN.md) -- design principles and contribution guidelines
 
 ## Running
 
