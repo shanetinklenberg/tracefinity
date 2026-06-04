@@ -20,7 +20,7 @@ Reference for AI agents. Check here before suggesting new features or claiming s
 ## Polygon Editing
 
 - Vertex add/remove/drag
-- Grid snap (2mm increments, toggle on/off)
+- Grid snap (5mm increments, toggle on/off)
 - Smoothing toggle (accurate vs smooth) with smoothness slider
 - 90-degree rotation (clockwise/counter-clockwise)
 - Flip/mirror (horizontal and vertical)
