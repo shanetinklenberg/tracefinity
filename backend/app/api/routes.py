@@ -73,7 +73,7 @@ from app.services.bin_store import BinStore
 from app.services.project_store import ProjectStore
 from app.services.bin_service import sync_placed_tools
 from app.services.image_service import generate_tool_thumbnail
-from app.services.tracer_registry import TRACER_LABELS, validate_tracer_ids
+from app.services.tracer_registry import TRACER_LABELS, tracer_kind, validate_tracer_ids
 from app.services.geometry import optimal_rotation_angle as _optimal_rotation_angle
 from app.services.project_service import (
     add_bin_to_project,
@@ -134,21 +134,33 @@ image_processor = ImageProcessor()
 _tracers: dict[str, AITracer] = {}
 
 
+def _remote_token(tracer_id: str) -> str | None:
+    return settings.replicate_api_token if tracer_id == "replicate" else settings.fal_key
+
+
 def _get_tracer(tracer_id: str | None = None) -> AITracer:
     """get or create a tracer for the given ID."""
     tid = tracer_id or settings.available_tracers[0]
     if tid not in _tracers:
-        if tid == "gemini":
+        kind = tracer_kind(tid)
+        if kind == "gemini":
             _tracers[tid] = AITracer(
                 model=settings.gemini_image_model,
                 openrouter_key=settings.openrouter_api_key,
                 openrouter_image_model=settings.openrouter_image_model,
             )
-        else:
+        elif kind == "remote":
+            token = _remote_token(tid)
+            model = settings.replicate_model if tid == "replicate" else settings.fal_model
             _tracers[tid] = AITracer(
-                local_model=True,
-                local_model_name=tid,
+                saliency_tracer=tid,
+                remote_model=model,
+                remote_token=token,
+                fal_operating_resolution=settings.fal_operating_resolution,
+                replicate_resolution=settings.replicate_resolution,
             )
+        else:
+            _tracers[tid] = AITracer(saliency_tracer=tid)
     return _tracers[tid]
 
 polygon_scaler = PolygonScaler()
@@ -553,11 +565,12 @@ async def get_available_keys(request: Request):
     """return available tracers and provider info."""
     tracers = settings.available_tracers
     has_cloud = bool(settings.google_api_key) or bool(settings.openrouter_api_key)
-    has_local = settings.use_local_model
+    has_saliency = settings.primary_is_saliency
     primary = tracers[0] if tracers else None
     return {
-        "google": has_cloud or has_local,
-        "provider": "local" if has_local else "gemini" if has_cloud else None,
+        # google: server can trace without a user-supplied key (cloud env key, local, or remote)
+        "google": has_cloud or has_saliency,
+        "provider": tracer_kind(primary) if primary else None,
         "provider_label": TRACER_LABELS.get(primary, primary) if primary else None,
         "tracers": [
             {"id": t, "label": TRACER_LABELS.get(t, t)}
@@ -581,6 +594,11 @@ async def trace_tools(request: Request, session_id: str, req: TraceRequest, user
     if tracer_id == "gemini" and not api_key and not settings.openrouter_api_key:
         raise HTTPException(status_code=400, detail="no api key provided")
 
+    if tracer_kind(tracer_id) == "remote":
+        if not _remote_token(tracer_id):
+            env = "REPLICATE_API_TOKEN" if tracer_id == "replicate" else "FAL_KEY"
+            raise HTTPException(status_code=400, detail=f"{tracer_id} token not set; set {env}")
+
     up = _user_path(user_id)
     mask_output_path = str(up / "processed" / f"{session_id}_mask.png")
 
@@ -592,8 +610,9 @@ async def trace_tools(request: Request, session_id: str, req: TraceRequest, user
             mask_output_path,
         )
     except TimeoutError:
-        logging.warning("gemini timed out after 60s")
-        raise HTTPException(status_code=504, detail="Gemini timed out — the model may be overloaded. Try again shortly.")
+        label = TRACER_LABELS.get(tracer_id, tracer_id)
+        logging.warning("%s timed out", tracer_id)
+        raise HTTPException(status_code=504, detail=f"{label} timed out; the model may be overloaded. Try again shortly.")
     except Exception as e:
         error_msg = str(e)
         if "insufficient_quota" in error_msg or "exceeded" in error_msg.lower():
@@ -602,6 +621,10 @@ async def trace_tools(request: Request, session_id: str, req: TraceRequest, user
             raise HTTPException(status_code=401, detail="Invalid API key")
         if "rate_limit" in error_msg.lower():
             raise HTTPException(status_code=429, detail="Rate limited - try again shortly")
+        if tracer_kind(tracer_id) == "remote":
+            label = TRACER_LABELS.get(tracer_id, tracer_id)
+            logging.error("%s provider error: %s", tracer_id, error_msg[:500], exc_info=True)
+            raise HTTPException(status_code=502, detail=f"{label} provider error; try again shortly.")
         logging.error("ai tracing failed: %s", error_msg[:500], exc_info=True)
         detail = f"AI tracing failed ({type(e).__name__}: {error_msg[:200]})"
         raise HTTPException(status_code=500, detail=detail)
