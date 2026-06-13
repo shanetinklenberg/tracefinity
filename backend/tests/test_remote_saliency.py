@@ -93,9 +93,6 @@ def test_replicate_resolves_version_and_posts_prediction():
                     "urls": {"get": "https://api.replicate.com/v1/predictions/abc"},
                 },
             )
-        if request.method == "DELETE":
-            seen["deleted"] = True
-            return httpx.Response(204)
         return httpx.Response(200, content=_png(mask), headers={"content-type": "image/png"})
 
     cfg = RemoteSaliencyConfig(provider="replicate", model="men1scus/birefnet", token="r8_x")
@@ -132,8 +129,6 @@ def test_replicate_pinned_version_skips_lookup():
                     "urls": {"get": "https://api.replicate.com/v1/predictions/abc"},
                 },
             )
-        if request.method == "DELETE":
-            return httpx.Response(204)
         return httpx.Response(200, content=_png(mask), headers={"content-type": "image/png"})
 
     cfg = RemoteSaliencyConfig(provider="replicate", model="men1scus/birefnet:pinned123", token="r8_x")

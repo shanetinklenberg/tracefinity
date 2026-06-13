@@ -117,17 +117,6 @@ async def _poll_replicate(client: httpx.AsyncClient, cfg: RemoteSaliencyConfig, 
     raise TimeoutError("replicate prediction did not finish in time")
 
 
-async def _best_effort_delete(client, cfg, pred) -> None:
-    """opportunistic purge; api predictions also auto-expire after ~1h."""
-    url = pred.get("urls", {}).get("get")
-    if not url:
-        return
-    try:
-        await client.delete(url, headers={"Authorization": f"Bearer {cfg.token}"})
-    except Exception:
-        pass
-
-
 async def _resolve_replicate_version(client: httpx.AsyncClient, cfg: RemoteSaliencyConfig) -> str:
     """resolve the version hash to run. `owner/name:version` pins explicitly;
     `owner/name` resolves (and caches) the model's latest version."""
@@ -166,6 +155,4 @@ async def _via_replicate(client: httpx.AsyncClient, cfg: RemoteSaliencyConfig, d
         output = output[0] if output else None
     if not output:
         raise ValueError("replicate prediction returned no output")
-    img = await _fetch_image_bytes(client, output)
-    await _best_effort_delete(client, cfg, pred)
-    return img
+    return await _fetch_image_bytes(client, output)

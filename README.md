@@ -49,7 +49,7 @@ docker run -p 3000:3000 -v ./data:/app/storage -e REPLICATE_API_TOKEN=your-token
 docker run -p 3000:3000 -v ./data:/app/storage --user "$(id -u):$(id -g)" ghcr.io/tracefinity/tracefinity
 ```
 
-With a remote provider the corrected paper crop is sent to that provider for masking. fal is called with `sync_mode`, so the result is not kept in request history; Replicate API predictions auto-purge after about an hour and the code also issues a best-effort delete.
+With a remote provider the corrected paper crop is sent to that provider for masking. fal is called with `sync_mode`, so the result is not kept in request history; Replicate API predictions (including the input image) auto-purge after about an hour, which is the only retention control Replicate exposes (it has no API to delete them sooner).
 
 Open http://localhost:3000
 
