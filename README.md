@@ -171,6 +171,7 @@ Step-by-step usage guides covering each part of the workflow:
 - [Projects](docs/usage/projects.md)
 - [Exporting](docs/usage/exporting.md)
 - [Keyboard shortcuts](docs/usage/keyboard-shortcuts.md)
+- [Backup and restore](docs/usage/backups.md)
 
 ## What is Gridfinity?
 
