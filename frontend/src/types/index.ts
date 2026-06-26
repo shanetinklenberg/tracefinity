@@ -59,6 +59,8 @@ export interface Session {
   polygons: Polygon[] | null
   stl_path: string | null
   layout: Layout | null
+  tools_saved_at: string | null
+  next_session_id: string | null
 }
 
 export interface SessionSummary {

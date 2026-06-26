@@ -40,10 +40,12 @@ async function fetchApi<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
+  const hasBody = !!options?.body
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
+    cache: 'no-store',
     headers: {
-      'Content-Type': 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...options?.headers,
     },
   })
@@ -65,10 +67,18 @@ async function fetchForm<T>(path: string, body: FormData): Promise<T> {
   return res.json()
 }
 
-export async function uploadImage(file: File): Promise<UploadResponse> {
+export async function uploadImage(file: File, sessionId?: string): Promise<UploadResponse> {
   const formData = new FormData()
   formData.append('image', file)
+  if (sessionId) {
+    formData.append('session_id', sessionId)
+  }
   return fetchForm('/api/upload', formData)
+}
+
+export async function createCaptureSession(): Promise<{ session_id: string }> {
+  const formData = new FormData()
+  return fetchForm('/api/sessions', formData)
 }
 
 export async function setCorners(
@@ -89,6 +99,15 @@ export interface TracerInfo {
 
 export async function getAvailableKeys(): Promise<{ google: boolean; provider: string | null; provider_label: string | null; tracers: TracerInfo[] }> {
   return fetchApi('/api/api-keys')
+}
+
+export interface ServerInfo {
+  hostname: string
+  lan_ip: string | null
+}
+
+export async function getServerInfo(): Promise<ServerInfo> {
+  return fetchApi('/api/server-info')
 }
 
 export async function traceTools(
@@ -159,7 +178,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 export async function updateSession(
   sessionId: string,
-  updates: { name?: string; description?: string; tags?: string[] }
+  updates: { name?: string; description?: string; tags?: string[]; next_session_id?: string | null; tools_saved_at?: string | null }
 ): Promise<void> {
   await fetchApi(`/api/sessions/${sessionId}`, {
     method: 'PATCH',

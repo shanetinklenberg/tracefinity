@@ -2,6 +2,18 @@
 
 Reference for AI agents. Check here before suggesting new features or claiming something is missing.
 
+## Mobile Capture
+
+- QR code session setup page (`/capture/setup`) — generates a session, displays a QR code
+- Mobile-optimized camera capture page (`/capture`) — opens rear camera via `capture="environment"`
+- Two-step upload flow: desktop creates pending session → phone fills it in
+- Three URL modes for QR codes: mDNS (`.local`), LAN IP, and custom (persisted to localStorage)
+- Desktop polls until mobile upload arrives, then allows progression to trace
+- PWA manifest and icons for "Add to Home Screen" on iOS/Android
+- `GET /api/server-info` endpoint for hostname/LAN IP detection
+- `POST /api/sessions` endpoint for pending session creation
+- `docker-up.sh` auto-detects host LAN IP and hostname, passes as env vars
+
 ## Tracing and Image Processing
 
 - Image upload (drag-drop or file picker, JPG/PNG/WebP/HEIC)

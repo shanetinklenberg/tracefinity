@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, field_validator
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from app.constants import PaperSize
 
@@ -195,6 +195,8 @@ class Session(BaseModel):
     polygons: list[Polygon] | None = None
     stl_path: str | None = None
     layout: Layout | None = None
+    tools_saved_at: str | None = None
+    next_session_id: str | None = None
 
 
 class SessionSummary(BaseModel):
@@ -217,6 +219,8 @@ class SessionUpdateRequest(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     layout: Layout | None = None
+    next_session_id: str | None = None
+    tools_saved_at: str | None = None
 
 
 class StatusResponse(BaseModel):

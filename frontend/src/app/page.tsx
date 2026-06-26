@@ -5,10 +5,10 @@ import { useRouter } from 'next/navigation'
 import { ImageUploader } from '@/components/ImageUploader'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { SectionHeader } from '@/components/SectionHeader'
-import { uploadImage, listTools, listBins, listProjects, deleteTool, deleteBin, deleteProject, createBin, createProject, getImageUrl } from '@/lib/api'
+import { uploadImage, listTools, listBins, listProjects, deleteTool, deleteBin, deleteProject, createBin, createProject, getImageUrl, API_URL } from '@/lib/api'
 import type { ToolSummary, BinSummary, BinPreviewTool, BinProjectSummary, Point, ToolImageContext, AffineMatrix, ProjectStatus } from '@/types'
 import { polygonPathData } from '@/lib/svg'
-import { Trash2, Package, Plus, Loader2, Grid3X3, Folder } from 'lucide-react'
+import { Trash2, Package, Plus, Loader2, Grid3X3, Folder, Smartphone } from 'lucide-react'
 import { Alert } from '@/components/Alert'
 import { PhotoIllustration, CornersIllustration, TraceIllustration, OrganiseIllustration } from '@/components/OnboardingIllustrations'
 import { GRID_UNIT } from '@/lib/constants'
@@ -399,8 +399,21 @@ export default function HomePage() {
   return (
     <div className="max-w-6xl mx-auto py-4 space-y-6">
       {/* upload */}
-      <div data-tour="upload">
-        <ImageUploader onUpload={handleUpload} disabled={uploading} />
+      <div data-tour="upload" className="flex flex-col sm:flex-row items-stretch gap-3">
+        <div className="flex-1">
+          <ImageUploader onUpload={handleUpload} disabled={uploading} />
+        </div>
+        <div className="flex-shrink-0 flex items-stretch">
+          <button
+            onClick={() => router.push('/capture/setup')}
+            className="glass-card px-4 py-3 flex flex-col items-center justify-center gap-2 hover:bg-glass-hover transition-colors cursor-pointer w-full sm:w-auto"
+          >
+            <Smartphone className="w-5 h-5 text-accent" />
+            <span className="text-xs font-medium text-text-secondary text-center leading-tight">
+              Start Mobile<br />Capture Session
+            </span>
+          </button>
+        </div>
       </div>
 
       {uploading && (
