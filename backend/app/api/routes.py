@@ -1357,7 +1357,7 @@ async def save_tools_from_session(request: Request, session_id: str, body: SaveT
 
         user_tools.set(tool_id, Tool(
             id=tool_id,
-            name=poly.label,
+            name=(body.labels or {}).get(poly.id, poly.label),
             points=centered,
             finger_holes=fholes,
             interior_rings=interior_rings,
