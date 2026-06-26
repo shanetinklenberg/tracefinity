@@ -5,10 +5,10 @@ import { useRouter } from 'next/navigation'
 import { ImageUploader } from '@/components/ImageUploader'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { SectionHeader } from '@/components/SectionHeader'
-import { uploadImage, listTools, listBins, listProjects, deleteTool, deleteBin, deleteProject, createBin, createProject, getImageUrl } from '@/lib/api'
-import type { ToolSummary, BinSummary, BinPreviewTool, BinProjectSummary, Point, ToolImageContext, AffineMatrix, ProjectStatus } from '@/types'
+import { uploadImage, listTools, listBins, listProjects, deleteTool, deleteBin, deleteProject, createBin, createProject, getImageUrl, API_URL } from '@/lib/api'
+import type { ToolSummary, BinSummary, BinPreviewTool, BinProjectSummary, Point, ToolImageContext, AffineMatrix, ProjectStatus, PaperSize } from '@/types'
 import { polygonPathData } from '@/lib/svg'
-import { Trash2, Package, Plus, Loader2, Grid3X3, Folder } from 'lucide-react'
+import { Trash2, Package, Plus, Loader2, Grid3X3, Folder, Download } from 'lucide-react'
 import { Alert } from '@/components/Alert'
 import { PhotoIllustration, CornersIllustration, TraceIllustration, OrganiseIllustration } from '@/components/OnboardingIllustrations'
 import { GRID_UNIT } from '@/lib/constants'
@@ -235,6 +235,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const { deleteTarget: deleteModal, requestDelete, clearDelete } = useDeleteConfirmation<{ type: 'tool' | 'bin' | 'project'; id: string }>()
   const [creatingBin, setCreatingBin] = useState<string | null>(null)
+  const [sheetPaperSize, setSheetPaperSize] = useState<PaperSize>('a4')
   const [nameModal, setNameModal] = useState<{ toolIds?: string[] } | null>(null)
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
@@ -334,6 +335,27 @@ export default function HomePage() {
     }
   }
 
+  async function handleDownloadMarkerSheet() {
+    try {
+      const response = await fetch(`${API_URL}/api/marker-sheet/${sheetPaperSize}`)
+      if (!response.ok) throw new Error('failed to download')
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `marker_sheet_${sheetPaperSize}.svg`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      window.open(`${API_URL}/api/marker-sheet/${sheetPaperSize}`, '_blank')
+    }
+  }
+
+  const PAPER_SIZE_OPTIONS: { value: PaperSize; label: string }[] = [
+    { value: 'a4', label: 'A4' },
+    { value: 'letter', label: 'Letter' },
+  ]
+
   async function handleDeleteTool(id: string) {
     try {
       await deleteTool(id)
@@ -401,6 +423,32 @@ export default function HomePage() {
       {/* upload */}
       <div data-tour="upload">
         <ImageUploader onUpload={handleUpload} disabled={uploading} />
+      </div>
+
+      <div className="flex items-center justify-center gap-2">
+        <span className="text-xs text-text-muted">Marker sheet:</span>
+        <div className="flex gap-0.5 rounded-md glass p-0.5">
+          {PAPER_SIZE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setSheetPaperSize(option.value)}
+              className={`h-6 px-2 rounded text-xs font-medium whitespace-nowrap ${
+                sheetPaperSize === option.value
+                  ? 'bg-surface text-text-primary shadow-sm'
+                  : 'text-text-muted hover:text-text-primary'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={handleDownloadMarkerSheet}
+          className="flex items-center gap-1 text-xs text-text-muted hover:text-accent transition-colors"
+        >
+          <Download className="w-3 h-3" />
+          Download
+        </button>
       </div>
 
       {uploading && (

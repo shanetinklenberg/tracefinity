@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 
 PX_PER_MM = 10
 
+# ArUco fiducial marker detection
+_ARUCO_DICT = cv2.aruco.DICT_4X4_50
+_EXPECTED_MARKER_IDS = {0, 1, 2, 3}  # TL, TR, BR, BL
+_MARKER_MM = 15.0                     # printed marker side length (mm)
+_MARKER_INSET_MM = 15.0               # distance from paper edge to nearest marker edge
+_MARKER_CENTER_OFFSET = _MARKER_INSET_MM + _MARKER_MM / 2.0  # 22.5 mm from paper corner to marker centre
+
 
 def _quad_aspect_ratio(
     corners: list[tuple[float, float]], principal_point: tuple[float, float]
@@ -123,12 +130,146 @@ class ImageProcessor:
         _, mask = cv2.threshold(alpha, 127, 255, cv2.THRESH_BINARY)
         return mask
 
-    def detect_paper_corners(self, image_path: str) -> list[tuple[float, float]] | None:
-        """detect paper corners by masking out tools first."""
+    def detect_fiducial_markers(self, image_path: str) -> list[tuple[float, float]] | None:
+        """detect paper corners using ArUco fiducial markers at the four corners.
+
+        returns 4 ordered corners (TL, TR, BR, BL) in image-pixel coordinates
+        or None if fewer than 4 expected markers are found."""
         img = cv2.imread(image_path)
         if img is None:
             return None
 
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        aruco_dict = cv2.aruco.getPredefinedDictionary(_ARUCO_DICT)
+        aruco_params = cv2.aruco.DetectorParameters()
+
+        try:
+            detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+            corners_list, ids, _rejected = detector.detectMarkers(gray)
+        except AttributeError:
+            corners_list, ids, _rejected = cv2.aruco.detectMarkers(
+                gray, aruco_dict, parameters=aruco_params
+            )
+
+        if ids is None or len(ids) < 4:
+            logger.debug("fiducial detection: found %d markers, need 4", len(ids) if ids is not None else 0)
+            return None
+
+        return self._marker_corners_from_detections(corners_list, ids)
+
+    def _marker_corners_from_detections(
+        self,
+        corners_list: list[np.ndarray],
+        ids: np.ndarray,
+    ) -> list[tuple[float, float]] | None:
+        """map detected ArUco marker centres to paper corner positions.
+
+        four marker centres in the image and their known positions on A4
+        paper define a perspective transform.  the inverse maps the paper
+        corners back to image pixels.  orientation is recovered from the
+        marker quad's true aspect ratio to survive foreshortening.
+
+        returns ordered corners (TL, TR, BR, BL) or None if any expected
+        ID is missing."""
+        # --- collect marker centres in image space -------------------------
+        id_to_center: dict[int, tuple[float, float]] = {}
+        for marker_corners, marker_id in zip(corners_list, ids):
+            mid = int(marker_id[0])
+            if mid in _EXPECTED_MARKER_IDS:
+                center = tuple(marker_corners[0].mean(axis=0))
+                id_to_center[mid] = (float(center[0]), float(center[1]))
+
+        if not _EXPECTED_MARKER_IDS.issubset(id_to_center.keys()):
+            logger.debug(
+                "fiducial detection: missing expected IDs, have %s",
+                sorted(id_to_center.keys()),
+            )
+            return None
+
+        # reject degenerate detections (marker edge shorter than 1 px)
+        for marker_corners, marker_id in zip(corners_list, ids):
+            mid = int(marker_id[0])
+            if mid not in _EXPECTED_MARKER_IDS:
+                continue
+            pts = marker_corners[0]
+            if float(np.linalg.norm(pts[0] - pts[1])) < 1.0:
+                return None
+
+        # --- infer orientation from the marker quad's true aspect ratio ----
+        src_ordered = np.array(
+            [id_to_center[i] for i in [0, 1, 2, 3]], dtype=np.float32
+        )
+        principal = (
+            float(src_ordered[:, 0].mean()),
+            float(src_ordered[:, 1].mean()),
+        )
+        estimated = _quad_aspect_ratio(
+            [(float(p[0]), float(p[1])) for p in src_ordered], principal
+        )
+
+        w_mm, h_mm = PAPER_SIZES["a4"]  # 210 × 297 portrait
+        if estimated is not None and estimated > 0:
+            ratio = w_mm / h_mm
+            if abs(math.log(estimated / ratio)) > abs(math.log(estimated * ratio)):
+                w_mm, h_mm = h_mm, w_mm  # landscape
+        else:
+            # degenerate quad — fall back to pixel-edge comparison
+            top_edge = float(np.linalg.norm(src_ordered[1] - src_ordered[0]))
+            left_edge = float(np.linalg.norm(src_ordered[3] - src_ordered[0]))
+            if top_edge > left_edge:
+                w_mm, h_mm = h_mm, w_mm
+
+        # --- known marker positions on paper (mm from top-left) ------------
+        offset = _MARKER_CENTER_OFFSET
+        marker_positions_mm = np.array(
+            [
+                [offset, offset],                     # TL
+                [w_mm - offset, offset],              # TR
+                [w_mm - offset, h_mm - offset],       # BR
+                [offset, h_mm - offset],              # BL
+            ],
+            dtype=np.float32,
+        )
+
+        # --- perspective transform: image px → paper mm --------------------
+        M = cv2.getPerspectiveTransform(src_ordered, marker_positions_mm)
+
+        # invert: paper mm → image px
+        M_inv = np.linalg.inv(M)
+
+        # map the four paper corners from mm into image pixels
+        paper_corners_mm = np.array(
+            [[0, 0], [w_mm, 0], [w_mm, h_mm], [0, h_mm]],
+            dtype=np.float32,
+        ).reshape(-1, 1, 2)
+        paper_corners_px = cv2.perspectiveTransform(paper_corners_mm, M_inv)
+
+        return [
+            (float(paper_corners_px[i][0][0]), float(paper_corners_px[i][0][1]))
+            for i in range(4)
+        ]
+
+    def detect_paper_corners(self, image_path: str) -> list[tuple[float, float]] | None:
+        """detect paper corners using fiducial markers first, falling back to
+        visual paper boundary detection."""
+        img = cv2.imread(image_path)
+        if img is None:
+            return None
+
+        # attempt 1: fiducial markers
+        try:
+            marker_corners = self.detect_fiducial_markers(image_path)
+            if marker_corners is not None:
+                logger.info("paper corners detected via ArUco fiducial markers")
+                return marker_corners
+        except Exception:
+            logger.warning(
+                "fiducial marker detection raised exception, falling back",
+                exc_info=True,
+            )
+
+        # attempt 2: visual paper boundary (existing logic)
+        logger.info("fiducial markers not found, falling back to visual detection")
         tool_mask = self._get_tool_mask(image_path)
         img[tool_mask > 0] = [0, 0, 0]
 
