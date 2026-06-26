@@ -130,12 +130,17 @@ class ImageProcessor:
         _, mask = cv2.threshold(alpha, 127, 255, cv2.THRESH_BINARY)
         return mask
 
-    def detect_fiducial_markers(self, image_path: str) -> list[tuple[float, float]] | None:
+    def detect_fiducial_markers(self, image: str | np.ndarray) -> list[tuple[float, float]] | None:
         """detect paper corners using ArUco fiducial markers at the four corners.
+
+        *image* may be a path to an image file or a pre-loaded BGR numpy array.
 
         returns 4 ordered corners (TL, TR, BR, BL) in image-pixel coordinates
         or None if fewer than 4 expected markers are found."""
-        img = cv2.imread(image_path)
+        if isinstance(image, str):
+            img = cv2.imread(image)
+        else:
+            img = image
         if img is None:
             return None
 
@@ -256,9 +261,9 @@ class ImageProcessor:
         if img is None:
             return None
 
-        # attempt 1: fiducial markers
+        # attempt 1: fiducial markers (reuse already-loaded img)
         try:
-            marker_corners = self.detect_fiducial_markers(image_path)
+            marker_corners = self.detect_fiducial_markers(img)
             if marker_corners is not None:
                 logger.info("paper corners detected via ArUco fiducial markers")
                 return marker_corners

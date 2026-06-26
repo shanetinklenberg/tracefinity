@@ -1,7 +1,8 @@
 # API Endpoints
 
 ## Sessions (trace workflow)
-- `POST /api/upload` - upload image, auto-detect corners
+- `POST /api/upload` - upload image, auto-detect corners. Accepts optional `session_id` to fill a pre-created session.
+- `POST /api/sessions` - create a pending session (no image). Used by mobile capture flow. Returns `session_id`.
 - `POST /api/sessions/{id}/corners` - set corners, apply perspective correction
 - `POST /api/sessions/{id}/trace` - AI trace tool outlines
 - `POST /api/sessions/{id}/trace-mask` - trace from uploaded mask
@@ -40,6 +41,9 @@
 - `POST /api/bin-projects/{id}/create-bin` - create a new bin from selected project tools, using project or request bin defaults
 - `GET /api/bin-projects/{id}/health` - report project/tool/bin link mismatches
 - `POST /api/bin-projects/{id}/repair` - repair safe project/tool/bin link mismatches
+
+## Server info
+- `GET /api/server-info` - returns hostname and LAN IP for QR code URL construction
 
 ## API Keys and tracer status
 - `GET /api-keys` - returns current provider and available tracers
@@ -145,3 +149,70 @@ The webhook is delivered as a `POST` with `Content-Type: application/json`:
   fires the webhook again. There is no deduplication.
 - **Backward compatible.** Existing sessions, tools, and bins without webhook
   fields deserialize with `webhook_url = null` and no webhook is fired.
+
+## Mobile capture flow
+
+The mobile capture feature uses a two-step API flow to let a phone camera feed
+into a desktop trace session.
+
+### Creating a pending session
+
+```
+POST /api/sessions
+Content-Type: multipart/form-data
+
+(no fields required — webhook_url and webhook_metadata are optional)
+```
+
+Returns `{"session_id": "<uuid>"}`. The session has no image yet; it waits for
+a mobile upload to fill it in.
+
+### Filling the session with a mobile upload
+
+```
+POST /api/upload
+Content-Type: multipart/form-data
+
+image: <file>
+session_id: <uuid from POST /api/sessions>
+```
+
+Validates that the session exists and has no image yet (404 if not found, 409
+if already filled). Preserves the session's `created_at` and webhook settings.
+
+### Polling for the upload
+
+The desktop setup page polls `GET /api/sessions/{id}` until
+`original_image_path` is non-null:
+
+```
+GET /api/sessions/{id}
+```
+
+When the field becomes non-null, the phone has completed its upload and the
+desktop can proceed to the trace/corners page.
+
+### Server info for QR code URLs
+
+```
+GET /api/server-info
+```
+
+Returns:
+```json
+{
+  "hostname": "tracefinity",
+  "lan_ip": "192.168.0.144"
+}
+```
+
+Hostname is returned without the `.local` suffix. The frontend constructs the
+capture URL as `http://<hostname>.local:<port>/capture?session=<id>`.
+
+Resolution order:
+1. `TRACEFINITY_HOST` / `TRACEFINITY_HOSTNAME` env vars (set by `docker-up.sh`)
+2. Request `Host` header
+3. OS hostname via `socket.gethostname()` and LAN IP detection
+
+In Docker, the container cannot detect the host's LAN IP. Use the env vars or
+the `docker-up.sh` script which auto-detects and passes them.

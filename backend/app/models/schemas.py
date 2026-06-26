@@ -197,6 +197,8 @@ class Session(BaseModel):
     layout: Layout | None = None
     webhook_url: str | None = None
     webhook_metadata: dict[str, Any] | None = None
+    tools_saved_at: str | None = None
+    next_session_id: str | None = None
 
 
 class SessionSummary(BaseModel):
@@ -221,6 +223,8 @@ class SessionUpdateRequest(BaseModel):
     layout: Layout | None = None
     webhook_url: str | None = None
     webhook_metadata: dict[str, Any] | None = None
+    next_session_id: str | None = None
+    tools_saved_at: str | None = None
 
 
 class StatusResponse(BaseModel):

@@ -12,6 +12,9 @@ build/
 *.egg-info/
 tsconfig.tsbuildinfo
 
+# data (docker volume mount)
+data/
+
 # storage
 backend/storage/uploads/*
 backend/storage/processed/*
@@ -32,6 +35,7 @@ storage/
 .vscode/
 .agents/
 .planning/
+.claude/
 *.swp
 
 # os

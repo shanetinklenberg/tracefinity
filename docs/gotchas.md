@@ -32,6 +32,57 @@ Single container runs both frontend and backend via supervisor. Key details:
 - `.dockerignore` excludes `docs/`, `node_modules/`, `venv/`, `storage/`, `.claude/`
 - Container runs as non-root user `tracefinity` (UID 1000) by default. Supports `--user "$(id -u):$(id -g)"` for arbitrary UIDs. Runtime-writable dirs (`/app/storage`, `/app/.u2net`, `/app/.next`, `/tmp/nginx`, `/tmp/supervisor`, `/var/lib/nginx`) are world-writable. `U2NET_HOME` and `HOME` are set to `/app` paths so model downloads and nginx/supervisor state work without root.
 
+### Supervisor environment variables
+
+Supervisor's `environment=` setting **replaces** the process environment — it does
+not merge with the Docker `ENV` values. Any env var the backend needs must be
+explicitly listed. Currently required:
+
+```
+environment=STORAGE_PATH="/app/storage",HOME="/app",NUMBA_CACHE_DIR="/tmp/numba_cache"
+```
+
+Without `HOME` and `NUMBA_CACHE_DIR`, Numba JIT compilation fails with
+`RuntimeError: cannot cache function: no locator available` because it can't
+write cache files to the Python site-packages directory (`pymatting`) when
+running as non-root.
+
+The `pymatting` site-packages directory must also be world-writable at build
+time (`chmod -R a+w` in the Dockerfile), since Numba writes JIT cache files
+alongside the source files.
+
+### nginx non-root
+
+nginx needs writable directories for its pid file and client body temp files:
+- `/tmp/nginx/` for the pid file
+- `/var/lib/nginx/body/` for client body temp files
+
+Both must be pre-created with `mkdir -p` and `chmod 777` at build time.
+
+## mDNS and LAN IP detection
+
+The QR code capture page needs a phone-reachable URL. Detection is layered:
+
+1. **`docker-up.sh` auto-detection** — detects the host's LAN IP (via `ip`,
+   `ifconfig`, or Python UDP fallback) and hostname, passes them as
+   `TRACEFINITY_HOST` and `TRACEFINITY_HOSTNAME` env vars to the container.
+
+2. **`GET /api/server-info` backend** — reads env vars first, then falls back to
+   the request `Host` header, then OS-level detection. Strips `.local` suffix
+   from hostnames (the frontend appends it).
+
+3. **Frontend URL mode selector** — persisted to `localStorage`. Defaults to
+   mDNS, with LAN IP and custom URL as alternatives.
+
+### Docker caveats
+
+- Docker containers cannot detect the host's LAN IP from inside. The host must
+  pass it via `TRACEFINITY_HOST` env var (done automatically by `docker-up.sh`).
+- Docker bridge IPs (`172.x.x.x`) are detected and replaced with the Docker
+  host gateway IP (read from `/proc/net/route`) when available.
+- macOS hostnames automatically get a `.local` suffix from Bonjour/mDNS.
+  `docker-up.sh` strips this so the frontend can add it consistently.
+
 ## OCCT / build123d performance
 
 Boolean operations (add, subtract) are single-threaded in OCCT. More cores don't help. Polygon cutouts are batched into a single sketch + single extrude to minimise the number of booleans. Apple Silicon is ~7x faster single-thread than EPYC 7402 for these operations.

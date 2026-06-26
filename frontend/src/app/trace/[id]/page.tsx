@@ -3,12 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
-import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight } from 'lucide-react'
+import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Smartphone, Home } from 'lucide-react'
 import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
 import { SessionInfo } from '@/components/SessionInfo'
 import { Alert } from '@/components/Alert'
-import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession, API_URL } from '@/lib/api'
+import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession, createCaptureSession, API_URL } from '@/lib/api'
 import { CornersHint, TraceHint, EditHint } from '@/components/OnboardingIllustrations'
 import { StepBar } from '@/components/StepBar'
 import type { PaperSize, Point, Polygon, Session } from '@/types'
@@ -70,6 +70,8 @@ export default function TracePage() {
   const [showPrompt, setShowPrompt] = useState(false)
   const [traceStatus, setTraceStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [creatingNewSession, setCreatingNewSession] = useState(false)
   const [includedPolygons, setIncludedPolygons] = useState<Set<string>>(new Set())
   const [hoveredPolygon, setHoveredPolygon] = useState<string | null>(null)
   const maskInputRef = useRef<HTMLInputElement>(null)
@@ -321,11 +323,35 @@ export default function TracePage() {
     setError(null)
     try {
       await saveToolsFromSession(sessionId, Array.from(includedPolygons))
-      router.push('/')
+      setSaved(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to save tools')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleReturnHome() {
+    try {
+      await updateSession(sessionId, { tools_saved_at: new Date().toISOString() })
+    } catch { /* non-critical */ }
+    router.push('/')
+  }
+
+  async function handleScanAnother() {
+    setCreatingNewSession(true)
+    try {
+      const { session_id } = await createCaptureSession()
+      // Mark current session complete and link the new one so the
+      // mobile page follows automatically.
+      await updateSession(sessionId, {
+        tools_saved_at: new Date().toISOString(),
+        next_session_id: session_id,
+      })
+      router.push(`/capture/setup?session=${session_id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to create session')
+      setCreatingNewSession(false)
     }
   }
 
@@ -657,7 +683,7 @@ export default function TracePage() {
             </button>
           )}
 
-          {step === 'edit' && (
+          {step === 'edit' && !saved && (
             <>
               <button
                 onClick={handleSaveToLibrary}
@@ -672,6 +698,34 @@ export default function TracePage() {
                 className="btn-secondary w-full py-1.5 text-sm inline-flex items-center justify-center"
               >
                 Re-trace
+              </button>
+            </>
+          )}
+
+          {step === 'edit' && saved && (
+            <>
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Check className="w-4 h-4 text-green-400" />
+                <span className="text-sm text-green-400 font-medium">Tools saved</span>
+              </div>
+              <button
+                onClick={handleReturnHome}
+                className="btn-secondary w-full py-2 text-sm inline-flex items-center justify-center gap-1.5"
+              >
+                <Home className="w-4 h-4" />
+                Return to Home
+              </button>
+              <button
+                onClick={handleScanAnother}
+                disabled={creatingNewSession}
+                className="btn-primary w-full py-2 text-sm inline-flex items-center justify-center gap-1.5"
+              >
+                {creatingNewSession ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Smartphone className="w-4 h-4" />
+                )}
+                {creatingNewSession ? 'Creating session...' : 'Scan Another Tool'}
               </button>
             </>
           )}
