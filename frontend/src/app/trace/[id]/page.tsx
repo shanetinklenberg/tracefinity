@@ -8,7 +8,7 @@ import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
 import { SessionInfo } from '@/components/SessionInfo'
 import { Alert } from '@/components/Alert'
-import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession } from '@/lib/api'
+import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession, API_URL } from '@/lib/api'
 import { CornersHint, TraceHint, EditHint } from '@/components/OnboardingIllustrations'
 import { StepBar } from '@/components/StepBar'
 import type { PaperSize, Point, Polygon, Session } from '@/types'
@@ -260,6 +260,23 @@ export default function TracePage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  async function handleDownloadMarkerSheet() {
+    try {
+      const response = await fetch(`${API_URL}/api/marker-sheet/${paperSize}`)
+      if (!response.ok) throw new Error('failed to download')
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `marker_sheet_${paperSize}.svg`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // fallback: open in new tab
+      window.open(`${API_URL}/api/marker-sheet/${paperSize}`, '_blank')
+    }
+  }
+
   async function handleDownloadImage() {
     if (!correctedImageUrl) return
     try {
@@ -380,6 +397,14 @@ export default function TracePage() {
                   ))}
                 </div>
               </div>
+
+              <button
+                onClick={handleDownloadMarkerSheet}
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-accent transition-colors"
+              >
+                <Download className="w-3 h-3" />
+                Download marker sheet
+              </button>
             </div>
           )}
 

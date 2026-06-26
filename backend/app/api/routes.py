@@ -61,10 +61,11 @@ from app.models.schemas import (
     BinUpdateRequest,
     CreateBinRequest,
 )
-from app.constants import GF_GRID
+from app.constants import GF_GRID, PaperSize
 from app.services.image_ingest import ingest_image
 from app.services.image_processor import ImageProcessor
 from app.services.ai_tracer import AITracer
+from app.services.marker_sheet import generate_marker_sheet_svg
 from app.services.polygon_scaler import PolygonScaler, ScaledPolygon, ScaledFingerHole
 from app.services.stl_generator_manifold import ManifoldSTLGenerator
 from app.services.session_store import SessionStore
@@ -591,6 +592,25 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
     return CornersResponse(
         corrected_image_url=f"/storage/{session.corrected_image_path}",
         scale_factor=scale_factor,
+    )
+
+
+@router.get("/marker-sheet/{paper_size}")
+async def get_marker_sheet(paper_size: PaperSize):
+    """return a printable marker-sheet SVG for the given paper size.
+
+    the SVG is dimensioned in real-world mm — print at 100% scale
+    (Actual size) for correct marker dimensions.
+    """
+    svg = generate_marker_sheet_svg(paper_size)
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=marker_sheet_{paper_size}.svg"
+            )
+        },
     )
 
 
