@@ -40,6 +40,11 @@ COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
+# numba writes JIT cache files next to the source in site-packages.
+# when the container runs as non-root (--user flag) those dirs must
+# be writable.
+RUN python3 -c "import pymatting, os; d=os.path.dirname(pymatting.__file__); os.system(f'chmod -R a+w {d}')"
+
 COPY backend/ ./backend/
 
 # frontend (built)
@@ -115,7 +120,7 @@ stderr_logfile_maxbytes=0
 [program:backend]
 command=uvicorn app.main:app --host 127.0.0.1 --port 8000
 directory=/app/backend
-environment=STORAGE_PATH="/app/storage"
+environment=STORAGE_PATH="/app/storage",HOME="/app",NUMBA_CACHE_DIR="/tmp/numba_cache"
 autostart=true
 autorestart=true
 stdout_logfile=/dev/stdout
@@ -138,7 +143,8 @@ SUPERVISOR_EOF
 # make all runtime-writable directories accessible to any UID
 RUN chmod -R 777 /app/storage /app/.u2net /app/.next && \
     chmod -R 777 /var/lib/nginx /var/log/nginx && \
-    mkdir -p /tmp/nginx /tmp/supervisor && chmod 777 /tmp/nginx /tmp/supervisor
+    mkdir -p /tmp/nginx /tmp/supervisor /tmp/numba_cache /var/lib/nginx/body && \
+    chmod 777 /tmp/nginx /tmp/supervisor /tmp/numba_cache /var/lib/nginx/body
 
 # entrypoint handles directory creation and privilege drop
 COPY docker-entrypoint.sh /usr/local/bin/

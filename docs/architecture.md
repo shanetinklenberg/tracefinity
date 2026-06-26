@@ -18,6 +18,8 @@
 - Project screen for planning a group of tools/bins and tracking placed vs unplaced tools
 - 3D STL preview (react-three-fiber)
 - Shows user what prompts are sent to Gemini
+- Mobile capture: QR code session setup on desktop, camera capture page on phone
+- PWA manifest for "Add to Home Screen" mobile experience
 
 ## Project Structure
 
@@ -49,7 +51,11 @@ tracefinity/
 │   │   │   ├── trace/[id]/            # corner + polygon editing
 │   │   │   ├── tools/[id]/            # tool vertex/hole editor
 │   │   │   ├── projects/[id]/         # project planning workflow
-│   │   │   └── bins/[id]/             # bin builder + 3D preview
+│   │   │   ├── bins/[id]/             # bin builder + 3D preview
+│   │   │   ├── capture/
+│   │   │   │   ├── page.tsx           # mobile camera capture (reads ?session=)
+│   │   │   │   └── setup/
+│   │   │   │       └── page.tsx       # desktop QR code session setup
 │   │   ├── components/
 │   │   │   ├── BinEditor.tsx          # bin layout orchestrator
 │   │   │   ├── BinEditorToolbar.tsx   # bin toolbar (mode, snap, actions)
@@ -62,6 +68,7 @@ tracefinity/
 │   │   │   ├── ToolBrowser.tsx        # sidebar tool picker for bins
 │   │   │   ├── PolygonEditor.tsx      # trace-time polygon editor
 │   │   │   ├── CutoutOverlay.tsx      # finger hole SVG rendering
+│   │   │   ├── QrCode.tsx             # reusable QR code (SSR-safe, qrcode.react)
 │   │   │   └── ...
 │   │   ├── hooks/
 │   │   │   ├── useDebouncedSave.ts    # debounced auto-save
@@ -91,9 +98,37 @@ PlacedTools sync with their library source on bin load (`GET /bins/{id}`) via `b
 
 Projects do not own tools or bins. Tools keep `project_ids`, bins keep `project_id`, and project health/repair endpoints keep those links consistent when records are renamed, deleted, or manually edited.
 
+### Upload and mobile capture flow
+
+Two paths to create a trace session:
+
+1. **Direct upload** — user drops a file on the home page. `POST /api/upload` creates a session with the image attached immediately.
+
+2. **Mobile capture** — a two-step flow for capturing photos from a phone:
+   - Desktop clicks "Start Mobile Capture Session" → calls `POST /api/sessions` to create a pending session (no image). A QR code is displayed containing the URL `<host>.local:<port>/capture?session=<id>`.
+   - Phone scans QR → opens the mobile-optimized `/capture` page. Camera `capture="environment"` opens the rear camera. Photo is uploaded via `POST /api/upload` with the `session_id` form field, which fills in the pre-created session.
+   - Desktop polls `GET /api/sessions/{id}` every 2 seconds until `original_image_path` becomes non-null, then enables the "Proceed to Trace" button.
+
+The capture page supports three URL modes (persisted to localStorage):
+- **mDNS** — `http://<hostname>.local:<port>/capture?session=<id>` (Bonjour, works on macOS/Linux LAN)
+- **LAN IP** — `http://<ip>:<port>/capture?session=<id>` (works everywhere but IP can change)
+- **Custom** — user-provided base URL
+
+### Server info endpoint
+
+`GET /api/server-info` resolves the server's hostname and LAN IP for QR code URL construction. Resolution order:
+1. `TRACEFINITY_HOST` / `TRACEFINITY_HOSTNAME` env vars (set by `docker-up.sh` for Docker)
+2. Request `Host` header (when already accessing via LAN)
+3. OS hostname + LAN IP detection (bare-metal / local dev)
+
+Hostnames are returned without the `.local` suffix; the frontend appends it.
+
+### PWA
+
+The `/capture` page is a Progressive Web App with `manifest.json`, service worker icons, and `apple-mobile-web-app-capable` meta tags. This lets users "Add to Home Screen" on iOS/Android for a native-like camera capture experience.
+
 ## Backend route helpers
 
-`routes.py` uses shared helpers to avoid duplication:
 - `_run_generate()` -- cache check, STL generation, split, zip, response. Used by both session and bin generation endpoints.
 - `_translate_points()` / `_translate_finger_holes()` -- offset points/holes by (dx, dy). Used when placing tools in bins.
 - `BinParams` base model in `schemas.py` -- shared fields and validators inherited by `BinConfig` and `GenerateRequest`.
