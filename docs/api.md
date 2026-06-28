@@ -117,12 +117,12 @@ The webhook is delivered as a `POST` with `Content-Type: application/json`:
   "bin_id": "<bin-id or null>",
   "webhook_metadata": { ... whatever was provided at upload ... },
   "result": {
-    "stl_url": "/storage/default/outputs/<id>.stl",
-    "stl_urls": ["/storage/default/outputs/<id>_part0.stl", "..."],
-    "threemf_url": "/storage/default/outputs/<id>.3mf",
+    "stl_url": "/storage/{user_id}/outputs/<id>.stl",
+    "stl_urls": ["/storage/{user_id}/outputs/<id>_part0.stl", "..."],
+    "threemf_url": "/storage/{user_id}/outputs/<id>.3mf",
     "split_count": 3,
-    "zip_url": "/storage/default/outputs/<id>_parts.zip",
-    "insert_stl_url": "/storage/default/outputs/<id>_insert.stl",
+    "zip_url": "/storage/{user_id}/outputs/<id>_parts.zip",
+    "insert_stl_url": "/storage/{user_id}/outputs/<id>_insert.stl",
     "warning": null
   }
 }
