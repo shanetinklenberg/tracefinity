@@ -69,6 +69,7 @@ export default function TracePage() {
   const [copied, setCopied] = useState(false)
   const [showPrompt, setShowPrompt] = useState(false)
   const [detectionMethod, setDetectionMethod] = useState<DetectionMethod | null>(null)
+  const [detectionMode, setDetectionMode] = useState<'fiducial' | 'visual'>('fiducial')
   const [traceStatus, setTraceStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -110,6 +111,7 @@ export default function TracePage() {
         }
         if (s.detection_method) {
           setDetectionMethod(s.detection_method)
+          setDetectionMode(s.detection_method === 'fiducial' ? 'fiducial' : 'visual')
         }
         if (s.paper_size) {
           setPaperSize(s.paper_size)
@@ -409,41 +411,82 @@ export default function TracePage() {
                 Drag the corner handles to match the paper edges.
               </p>
 
-              {detectionMethod && (
-                <div className={`flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-lg ${
-                  detectionMethod === 'fiducial'
-                    ? 'bg-accent/10 text-accent'
-                    : 'bg-amber-500/10 text-amber-400'
-                }`}>
-                  {detectionMethod === 'fiducial' ? (
+              {/* Detection method indicator */}
+              {detectionMethod === 'fiducial' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-lg bg-accent/10 text-accent">
                     <ScanLine className="w-3.5 h-3.5" />
-                  ) : (
-                    <Image className="w-3.5 h-3.5" />
-                  )}
-                  <span>
-                    {detectionMethod === 'fiducial'
-                      ? 'Fiducial markers detected'
-                      : 'Paper edges detected (no fiducials)'}
-                  </span>
+                    <span>Fiducial markers detected</span>
+                  </div>
+
+                  {/* Mode radio: fiducial vs paper edges */}
+                  <div>
+                    <span className="text-[10px] text-text-muted uppercase tracking-widest">
+                      Detection
+                    </span>
+                    <div className="grid grid-cols-2 gap-0.5 rounded-[10px] glass p-0.5 mt-1 w-full">
+                      <button
+                        onClick={() => setDetectionMode('fiducial')}
+                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1 ${
+                          detectionMode === 'fiducial'
+                            ? 'bg-surface text-text-primary shadow-sm'
+                            : 'text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        <ScanLine className="w-3 h-3" />
+                        Fiducial
+                      </button>
+                      <button
+                        onClick={() => setDetectionMode('visual')}
+                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1 ${
+                          detectionMode === 'visual'
+                            ? 'bg-surface text-text-primary shadow-sm'
+                            : 'text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        <Image className="w-3 h-3" />
+                        Edges
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
+              {detectionMethod === 'visual' && (
+                <div className="flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-lg bg-amber-500/10 text-amber-400">
+                  <Image className="w-3.5 h-3.5" />
+                  <span>Paper edges detected (no fiducials)</span>
+                </div>
+              )}
+
+              {/* Paper size — locked when fiducial mode is active */}
               <div>
-                <span className="text-xs text-text-primary tracking-[0.3px]">Paper Size</span>
+                <span className="text-xs text-text-primary tracking-[0.3px]">
+                  Paper Size
+                  {detectionMethod === 'fiducial' && detectionMode === 'fiducial' && (
+                    <span className="text-[10px] text-text-muted ml-1">(auto)</span>
+                  )}
+                </span>
                 <div className="grid grid-cols-2 gap-0.5 rounded-[10px] glass p-0.5 mt-1.5 w-full">
-                  {PAPER_SIZE_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => setPaperSize(option.value)}
-                      className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap ${
-                        paperSize === option.value
-                          ? 'bg-surface text-text-primary shadow-sm'
-                          : 'text-text-muted hover:text-text-primary'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+                  {PAPER_SIZE_OPTIONS.map((option) => {
+                    const locked = detectionMethod === 'fiducial' && detectionMode === 'fiducial'
+                    return (
+                      <button
+                        key={option.value}
+                        onClick={() => { if (!locked) setPaperSize(option.value) }}
+                        disabled={locked}
+                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap ${
+                          paperSize === option.value
+                            ? 'bg-surface text-text-primary shadow-sm'
+                            : locked
+                              ? 'text-text-muted/40 cursor-not-allowed'
+                              : 'text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
