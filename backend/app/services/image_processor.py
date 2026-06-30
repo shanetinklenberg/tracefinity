@@ -14,10 +14,29 @@ PX_PER_MM = 10
 
 # ArUco fiducial marker detection
 _ARUCO_DICT = cv2.aruco.DICT_4X4_50
-_EXPECTED_MARKER_IDS = {0, 1, 2, 3}  # TL, TR, BR, BL
 _MARKER_MM = 15.0                     # printed marker side length (mm)
 _MARKER_INSET_MM = 15.0               # distance from paper edge to nearest marker edge
 _MARKER_CENTER_OFFSET = _MARKER_INSET_MM + _MARKER_MM / 2.0  # 22.5 mm from paper corner to marker centre
+
+# Paper-size-specific marker IDs: (TL, TR, BR, BL)
+# Each paper size gets a unique set so the detector can auto-identify
+# which sheet was printed.
+_PAPER_MARKER_IDS: dict[PaperSize, tuple[int, int, int, int]] = {
+    "letter":  (0, 1, 2, 3),
+    "a4":      (4, 5, 6, 7),
+    "a3":      (8, 9, 10, 11),
+    "tabloid": (12, 13, 14, 15),
+}
+
+# Reverse lookup: marker set → paper size
+_MARKER_IDS_TO_SIZE: dict[tuple[int, ...], PaperSize] = {
+    v: k for k, v in _PAPER_MARKER_IDS.items()
+}
+
+# All expected marker IDs (for quick subset checks)
+_ALL_EXPECTED_IDS: set[int] = set()
+for ids in _PAPER_MARKER_IDS.values():
+    _ALL_EXPECTED_IDS.update(ids)
 
 
 def _quad_aspect_ratio(
@@ -145,22 +164,25 @@ class ImageProcessor:
 
     def detect_fiducial_markers(
         self, image: str | np.ndarray, paper_size: PaperSize = "letter",
-    ) -> list[tuple[float, float]] | None:
+    ) -> tuple[list[tuple[float, float]] | None, PaperSize | None]:
         """detect paper corners using ArUco fiducial markers at the four corners.
 
         *image* may be a path to an image file or a pre-loaded BGR numpy array.
 
         tries multiple preprocessing strategies to handle varied lighting
-        (underexposed photos, shadows, etc.).
+        and auto-detects the paper size from the marker IDs found.
 
-        returns 4 ordered corners (TL, TR, BR, BL) in image-pixel coordinates
-        or None if fewer than 4 expected markers are found."""
+        returns (corners, detected_paper_size) where corners are 4 ordered
+        corners (TL, TR, BR, BL) in image-pixel coordinates and
+        detected_paper_size is the paper format that was identified.
+        returns (None, None) if fewer than 4 markers for any paper size
+        are found."""
         if isinstance(image, str):
             img = cv2.imread(image)
         else:
             img = image
         if img is None:
-            return None
+            return None, None
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         aruco_dict = cv2.aruco.getPredefinedDictionary(_ARUCO_DICT)
@@ -202,36 +224,46 @@ class ImageProcessor:
             corners_list, ids = self._detect_markers_on_image(
                 proc, aruco_dict, aruco_params,
             )
-            if ids is not None and len(ids) >= 4 and {0, 1, 2, 3}.issubset(
-                set(int(i[0]) for i in ids)
-            ):
-                logger.info(
-                    "fiducial detection (%s): found %d markers (IDs: %s)",
-                    name, len(ids), sorted(int(i[0]) for i in ids),
-                )
-                return self._marker_corners_from_detections(
-                    corners_list, ids, paper_size,
-                )
+            if ids is None or len(ids) < 4:
+                if ids is not None and len(ids) > 0:
+                    logger.info(
+                        "fiducial detection (%s): found %d markers (IDs: %s) — "
+                        "need 4 matching a paper size",
+                        name, len(ids), sorted(int(i[0]) for i in ids),
+                    )
+                elif ids is not None:
+                    logger.info(
+                        "fiducial detection (%s): no markers found", name,
+                    )
+                continue
 
-            if ids is not None and len(ids) > 0:
-                logger.info(
-                    "fiducial detection (%s): found %d markers but missing "
-                    "expected IDs 0-3 (have: %s)",
-                    name, len(ids),
-                    sorted(int(i[0]) for i in ids),
-                )
-            elif ids is not None and len(ids) == 0:
-                logger.info(
-                    "fiducial detection (%s): no markers found", name,
-                )
+            # check each paper size's marker set
+            found_ids = set(int(i[0]) for i in ids)
+            for ps, expected_ids in _PAPER_MARKER_IDS.items():
+                if set(expected_ids).issubset(found_ids):
+                    logger.info(
+                        "fiducial detection (%s): found %s markers "
+                        "(IDs: %s, paper=%s)",
+                        name, ps, sorted(found_ids & _ALL_EXPECTED_IDS), ps,
+                    )
+                    return self._marker_corners_from_detections(
+                        corners_list, ids, ps, expected_ids,
+                    ), ps
 
-        return None
+            logger.info(
+                "fiducial detection (%s): found %d markers but no "
+                "complete paper-size set (have: %s)",
+                name, len(ids), sorted(found_ids),
+            )
+
+        return None, None
 
     def _marker_corners_from_detections(
         self,
         corners_list: list[np.ndarray],
         ids: np.ndarray,
-        paper_size: PaperSize = "letter",
+        paper_size: PaperSize,
+        expected_ids: tuple[int, int, int, int],
     ) -> list[tuple[float, float]] | None:
         """map detected ArUco marker centres to paper corner positions.
 
@@ -240,27 +272,38 @@ class ImageProcessor:
         corners back to image pixels.  orientation is recovered from the
         marker quad's true aspect ratio to survive foreshortening.
 
+        *expected_ids* encodes (TL, TR, BR, BL) marker IDs for the paper
+        size that was detected.
+
         returns ordered corners (TL, TR, BR, BL) or None if any expected
         ID is missing."""
-        # --- collect marker centres in image space -------------------------
-        id_to_center: dict[int, tuple[float, float]] = {}
+        expected_set = set(expected_ids)
+
+        # --- collect marker centres mapped by corner position --------------
+        # marker ID → corner index (0=TL, 1=TR, 2=BR, 3=BL)
+        id_to_corner: dict[int, int] = {
+            mid: idx for idx, mid in enumerate(expected_ids)
+        }
+        corner_centers: dict[int, tuple[float, float]] = {}
         for marker_corners, marker_id in zip(corners_list, ids):
             mid = int(marker_id[0])
-            if mid in _EXPECTED_MARKER_IDS:
+            if mid in id_to_corner:
                 center = tuple(marker_corners[0].mean(axis=0))
-                id_to_center[mid] = (float(center[0]), float(center[1]))
+                corner_centers[id_to_corner[mid]] = (
+                    float(center[0]), float(center[1]),
+                )
 
-        if not _EXPECTED_MARKER_IDS.issubset(id_to_center.keys()):
+        if len(corner_centers) < 4:
             logger.debug(
                 "fiducial detection: missing expected IDs, have %s",
-                sorted(id_to_center.keys()),
+                sorted(corner_centers.keys()),
             )
             return None
 
         # reject degenerate detections (marker edge shorter than 1 px)
         for marker_corners, marker_id in zip(corners_list, ids):
             mid = int(marker_id[0])
-            if mid not in _EXPECTED_MARKER_IDS:
+            if mid not in expected_set:
                 continue
             pts = marker_corners[0]
             if float(np.linalg.norm(pts[0] - pts[1])) < 1.0:
@@ -268,7 +311,7 @@ class ImageProcessor:
 
         # --- infer orientation from the marker quad's true aspect ratio ----
         src_ordered = np.array(
-            [id_to_center[i] for i in [0, 1, 2, 3]], dtype=np.float32
+            [corner_centers[i] for i in range(4)], dtype=np.float32
         )
         principal = (
             float(src_ordered[:, 0].mean()),
@@ -322,23 +365,30 @@ class ImageProcessor:
 
     def detect_paper_corners(
         self, image_path: str, paper_size: PaperSize = "letter",
-    ) -> tuple[list[tuple[float, float]] | None, str | None]:
+    ) -> tuple[list[tuple[float, float]] | None, str | None, PaperSize | None]:
         """detect paper corners using fiducial markers first, falling back to
         visual paper boundary detection, and finally to a full-frame
         assumption when the paper fills most of the image.
 
-        returns (corners, detection_method) where detection_method is
-        "fiducial", "visual", or None (if no corners found)."""
+        returns (corners, detection_method, detected_paper_size) where
+        detection_method is "fiducial", "visual", or None, and
+        detected_paper_size is the auto-detected paper format (fiducial)
+        or the user's selection (visual fallback)."""
         img = cv2.imread(image_path)
         if img is None:
-            return None, None
+            return None, None, None
 
         # attempt 1: fiducial markers (reuse already-loaded img)
         try:
-            marker_corners = self.detect_fiducial_markers(img, paper_size)
-            if marker_corners is not None:
-                logger.info("paper corners detected via ArUco fiducial markers")
-                return marker_corners, "fiducial"
+            marker_corners, detected_ps = self.detect_fiducial_markers(
+                img, paper_size,
+            )
+            if marker_corners is not None and detected_ps is not None:
+                logger.info(
+                    "paper corners detected via ArUco fiducial markers (%s)",
+                    detected_ps,
+                )
+                return marker_corners, "fiducial", detected_ps
         except Exception:
             logger.warning(
                 "fiducial marker detection raised exception, falling back",
@@ -391,7 +441,7 @@ class ImageProcessor:
                 )
 
         method = "visual" if visual_corners is not None else None
-        return visual_corners, method
+        return visual_corners, method, paper_size
 
     def _detect_paper(self, img: np.ndarray) -> list[tuple[float, float]] | None:
         """core paper detection on an image (possibly with tools blacked out)."""

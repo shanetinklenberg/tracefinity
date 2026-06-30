@@ -576,7 +576,9 @@ async def upload_image(
     image_path = up / "uploads" / f"{session_id}{ext}"
     image_path.write_bytes(content)
 
-    corners, detection_method = image_processor.detect_paper_corners(str(image_path))
+    corners, detection_method, detected_paper_size = (
+        image_processor.detect_paper_corners(str(image_path))
+    )
     corner_points = [Point(x=c[0], y=c[1]) for c in corners] if corners else None
 
     parsed_metadata: dict | None = None
@@ -604,6 +606,7 @@ async def upload_image(
         created_at=created_at,
         original_image_path=_rel(image_path, up),
         corners=corner_points,
+        paper_size=detected_paper_size if detection_method == "fiducial" else None,
         webhook_url=final_webhook_url,
         webhook_metadata=final_webhook_metadata,
         detection_method=detection_method,

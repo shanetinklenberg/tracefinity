@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from app.constants import PAPER_SIZES, PaperSize
+from app.services.image_processor import _PAPER_MARKER_IDS
 
 _MARKER_MM = 15.0
 _MARKER_INSET_MM = 15.0
@@ -59,25 +60,29 @@ def _marker_svg_group(marker_id: int, dictionary: cv2.aruco.Dictionary) -> str:
 def generate_marker_sheet_svg(paper_size: PaperSize) -> str:
     """generate a printable marker‑sheet SVG for *paper_size*.
 
-    four ArUco markers (IDs 0‑3 for TL, TR, BR, BL) are placed inset
-    from the paper corners.  the SVG uses mm units so that a print dialog
-    set to "Actual size" produces correct physical markers.
+    each paper size uses a unique set of four ArUco markers so the
+    detector can auto-identify the paper format.  the SVG uses mm units
+    so that a print dialog set to "Actual size" produces correct
+    physical markers.
     """
     width_mm, height_mm = PAPER_SIZES[paper_size]
     offset = _marker_center_offset()
 
+    # marker IDs for this paper size: (TL, TR, BR, BL)
+    id_tl, id_tr, id_br, id_bl = _PAPER_MARKER_IDS[paper_size]
+
     # marker centre positions on the paper (mm from top‑left)
     positions: dict[int, tuple[float, float]] = {
-        0: (offset, offset),                     # TL
-        1: (width_mm - offset, offset),           # TR
-        2: (width_mm - offset, height_mm - offset),  # BR
-        3: (offset, height_mm - offset),          # BL
+        id_tl: (offset, offset),
+        id_tr: (width_mm - offset, offset),
+        id_br: (width_mm - offset, height_mm - offset),
+        id_bl: (offset, height_mm - offset),
     }
 
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 
     marker_groups: list[str] = []
-    for marker_id in [0, 1, 2, 3]:
+    for marker_id in [id_tl, id_tr, id_br, id_bl]:
         cx, cy = positions[marker_id]
         # position the marker group so its top‑left corner is at (cx, cy)
         # offset by half the marker size to centre it
