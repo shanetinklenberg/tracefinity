@@ -23,38 +23,35 @@ def _marker_center_offset() -> float:
 
 
 def _marker_svg_group(marker_id: int, dictionary: cv2.aruco.Dictionary) -> str:
-    """return an SVG <g> element for a single 15×15 mm ArUco marker.
+    """return an SVG <image> element for a 15×15 mm ArUco marker.
 
-    the marker is a 4×4 grid with a 1‑cell white border, rendered as white
-    background plus black <rect> elements for each dark data cell.
+    the marker is rendered at high resolution by OpenCV and embedded as a
+    PNG data URI so the printed result matches exactly what the ArUco
+    detector expects.  the SVG coordinates are in mm.
     """
-    side_px = 60  # must be divisible by 6 (border + 4 data + border)
-    img = cv2.aruco.generateImageMarker(dictionary, marker_id, side_px)
-    cell_px = side_px // 6  # pixels per logical cell
-    cell_mm = _MARKER_MM / 6  # mm per logical cell (2.5 mm)
+    import base64
+    import io
 
-    rects: list[str] = []
-    for data_row in range(4):
-        for data_col in range(4):
-            # logical grid position (skip the 1‑cell white border)
-            grid_row = 1 + data_row
-            grid_col = 1 + data_col
-            px_y = grid_row * cell_px + cell_px // 2
-            px_x = grid_col * cell_px + cell_px // 2
-            if img[px_y, px_x] == 0:  # black pixel
-                x = (1 + data_col) * cell_mm
-                y = (1 + data_row) * cell_mm
-                rects.append(
-                    f'<rect x="{x:.2f}" y="{y:.2f}" '
-                    f'width="{cell_mm:.2f}" height="{cell_mm:.2f}" fill="black"/>'
-                )
+    # render at high resolution (divisible by 7 for correct ArUco cell grid)
+    render_px = 126  # 7×18 — cleanly divisible, ~8.4 px/mm for 15 mm marker
+    img = cv2.aruco.generateImageMarker(dictionary, marker_id, render_px)
 
-    parts = [
-        f'<rect x="0" y="0" width="{_MARKER_MM}" height="{_MARKER_MM}" '
-        f'fill="white"/>',
-        *rects,
-    ]
-    return "\n".join(parts)
+    # encode as PNG data URI
+    success, png_bytes = cv2.imencode(".png", img)
+    if not success:
+        # fallback: generate a larger version
+        render_px = 210  # 7×30
+        img = cv2.aruco.generateImageMarker(dictionary, marker_id, render_px)
+        success, png_bytes = cv2.imencode(".png", img)
+
+    b64 = base64.b64encode(png_bytes.tobytes()).decode("ascii")
+    data_uri = f"data:image/png;base64,{b64}"
+
+    return (
+        f'<image x="0" y="0" width="{_MARKER_MM}" height="{_MARKER_MM}" '
+        f'preserveAspectRatio="none" '
+        f'href="{data_uri}"/>'
+    )
 
 
 def generate_marker_sheet_svg(paper_size: PaperSize) -> str:
