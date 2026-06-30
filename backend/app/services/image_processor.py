@@ -130,12 +130,28 @@ class ImageProcessor:
         _, mask = cv2.threshold(alpha, 127, 255, cv2.THRESH_BINARY)
         return mask
 
+    def _detect_markers_on_image(
+        self, gray: np.ndarray, aruco_dict, aruco_params,
+    ) -> tuple[list[np.ndarray] | None, np.ndarray | None]:
+        """run ArUco detection on a grayscale image. returns (corners, ids)."""
+        try:
+            detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+            corners_list, ids, _rejected = detector.detectMarkers(gray)
+        except AttributeError:
+            corners_list, ids, _rejected = cv2.aruco.detectMarkers(
+                gray, aruco_dict, parameters=aruco_params
+            )
+        return corners_list, ids
+
     def detect_fiducial_markers(
         self, image: str | np.ndarray, paper_size: PaperSize = "letter",
     ) -> list[tuple[float, float]] | None:
         """detect paper corners using ArUco fiducial markers at the four corners.
 
         *image* may be a path to an image file or a pre-loaded BGR numpy array.
+
+        tries multiple preprocessing strategies to handle varied lighting
+        (underexposed photos, shadows, etc.).
 
         returns 4 ordered corners (TL, TR, BR, BL) in image-pixel coordinates
         or None if fewer than 4 expected markers are found."""
@@ -148,9 +164,9 @@ class ImageProcessor:
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         aruco_dict = cv2.aruco.getPredefinedDictionary(_ARUCO_DICT)
-        aruco_params = cv2.aruco.DetectorParameters()
 
-        # tune detection for small printed markers in varied lighting
+        # shared detection params tuned for printed 15 mm markers
+        aruco_params = cv2.aruco.DetectorParameters()
         aruco_params.adaptiveThreshWinSizeMin = 3
         aruco_params.adaptiveThreshWinSizeMax = 31
         aruco_params.adaptiveThreshWinSizeStep = 4
@@ -158,23 +174,58 @@ class ImageProcessor:
         aruco_params.polygonalApproxAccuracyRate = 0.05
         aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
-        try:
-            detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
-            corners_list, ids, _rejected = detector.detectMarkers(gray)
-        except AttributeError:
-            corners_list, ids, _rejected = cv2.aruco.detectMarkers(
-                gray, aruco_dict, parameters=aruco_params
-            )
+        # try a sequence of preprocessing strategies
+        strategies: list[tuple[str, np.ndarray]] = [
+            ("raw", gray),
+        ]
 
-        if ids is None or len(ids) < 4:
-            logger.info(
-                "fiducial detection: found %d markers, need 4",
-                len(ids) if ids is not None else 0,
-            )
-            return None
+        # CLAHE (local histogram equalisation — helps with shadows)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        strategies.append(("clahe", clahe.apply(gray)))
 
-        logger.info("fiducial detection: found %d markers (IDs: %s)", len(ids), sorted(ids.flatten()))
-        return self._marker_corners_from_detections(corners_list, ids, paper_size)
+        # gamma correction to lift dark shadows
+        for gamma in (0.5, 0.35, 0.6):
+            lookup = np.array(
+                [((i / 255.0) ** gamma) * 255 for i in range(256)]
+            ).astype(np.uint8)
+            strategies.append((f"gamma={gamma}", cv2.LUT(gray, lookup)))
+
+        # auto-levels (percentile stretch)
+        p2, p98 = np.percentile(gray, (2, 98))
+        if p98 - p2 > 30:  # only if there's meaningful range
+            stretched = np.clip(
+                (gray.astype(float) - p2) * 255.0 / (p98 - p2), 0, 255
+            ).astype(np.uint8)
+            strategies.append(("autolevel", stretched))
+
+        for name, proc in strategies:
+            corners_list, ids = self._detect_markers_on_image(
+                proc, aruco_dict, aruco_params,
+            )
+            if ids is not None and len(ids) >= 4 and {0, 1, 2, 3}.issubset(
+                set(int(i[0]) for i in ids)
+            ):
+                logger.info(
+                    "fiducial detection (%s): found %d markers (IDs: %s)",
+                    name, len(ids), sorted(int(i[0]) for i in ids),
+                )
+                return self._marker_corners_from_detections(
+                    corners_list, ids, paper_size,
+                )
+
+            if ids is not None and len(ids) > 0:
+                logger.info(
+                    "fiducial detection (%s): found %d markers but missing "
+                    "expected IDs 0-3 (have: %s)",
+                    name, len(ids),
+                    sorted(int(i[0]) for i in ids),
+                )
+            elif ids is not None and len(ids) == 0:
+                logger.info(
+                    "fiducial detection (%s): no markers found", name,
+                )
+
+        return None
 
     def _marker_corners_from_detections(
         self,
@@ -273,7 +324,8 @@ class ImageProcessor:
         self, image_path: str, paper_size: PaperSize = "letter",
     ) -> tuple[list[tuple[float, float]] | None, str | None]:
         """detect paper corners using fiducial markers first, falling back to
-        visual paper boundary detection.
+        visual paper boundary detection, and finally to a full-frame
+        assumption when the paper fills most of the image.
 
         returns (corners, detection_method) where detection_method is
         "fiducial", "visual", or None (if no corners found)."""
@@ -293,12 +345,51 @@ class ImageProcessor:
                 exc_info=True,
             )
 
-        # attempt 2: visual paper boundary (existing logic)
+        # attempt 2: visual paper boundary detection
         logger.info("fiducial markers not found, falling back to visual detection")
         tool_mask = self._get_tool_mask(image_path)
-        img[tool_mask > 0] = [0, 0, 0]
+        total_px = tool_mask.size
+        tool_px = int(np.count_nonzero(tool_mask > 0))
 
-        visual_corners = self._detect_paper(img)
+        # if the tool mask covers most of the image the saliency model is
+        # hallucinating — skip masking so we don't destroy the paper edges
+        if tool_px > total_px * 0.4:
+            logger.info(
+                "tool mask covers %.0f%% of image — skipping, may be a "
+                "false positive from the saliency model",
+                tool_px / total_px * 100,
+            )
+            masked_img = img
+        else:
+            masked_img = img.copy()
+            masked_img[tool_mask > 0] = [0, 0, 0]
+
+        visual_corners = self._detect_paper(masked_img)
+
+        # fallback: if masking broke detection, try the raw image
+        if visual_corners is None and tool_px > 0 and masked_img is not img:
+            logger.info("visual detection failed on masked image, retrying raw")
+            visual_corners = self._detect_paper(img)
+
+        # last resort: if the image is mostly bright content (paper fills
+        # the frame), use the full image with a small margin as the paper
+        if visual_corners is None:
+            h, w = img.shape[:2]
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            bright_ratio = int(np.count_nonzero(gray > 80)) / gray.size
+            if bright_ratio > 0.4:
+                margin = int(min(w, h) * 0.03)
+                visual_corners = [
+                    (float(margin), float(margin)),
+                    (float(w - margin), float(margin)),
+                    (float(w - margin), float(h - margin)),
+                    (float(margin), float(h - margin)),
+                ]
+                logger.info(
+                    "visual detection: using full frame as paper "
+                    "(%.0f%% bright, margin=%dpx)", bright_ratio * 100, margin,
+                )
+
         method = "visual" if visual_corners is not None else None
         return visual_corners, method
 

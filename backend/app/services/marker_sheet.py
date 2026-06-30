@@ -50,7 +50,7 @@ def _marker_svg_group(marker_id: int, dictionary: cv2.aruco.Dictionary) -> str:
 
     parts = [
         f'<rect x="0" y="0" width="{_MARKER_MM}" height="{_MARKER_MM}" '
-        f'fill="white" stroke="black" stroke-width="0.3"/>',
+        f'fill="white"/>',
         *rects,
     ]
     return "\n".join(parts)
