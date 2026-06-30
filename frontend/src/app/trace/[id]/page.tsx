@@ -427,9 +427,9 @@ export default function TracePage() {
                     <div className="grid grid-cols-2 gap-0.5 rounded-[10px] glass p-0.5 mt-1 w-full">
                       <button
                         onClick={() => setDetectionMode('fiducial')}
-                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1 ${
+                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1 transition-colors ${
                           detectionMode === 'fiducial'
-                            ? 'bg-surface text-text-primary shadow-sm'
+                            ? 'bg-accent/15 text-accent ring-1 ring-accent/30'
                             : 'text-text-muted hover:text-text-primary'
                         }`}
                       >
@@ -438,9 +438,9 @@ export default function TracePage() {
                       </button>
                       <button
                         onClick={() => setDetectionMode('visual')}
-                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1 ${
+                        className={`h-7 px-2 rounded text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1 transition-colors ${
                           detectionMode === 'visual'
-                            ? 'bg-surface text-text-primary shadow-sm'
+                            ? 'bg-accent/15 text-accent ring-1 ring-accent/30'
                             : 'text-text-muted hover:text-text-primary'
                         }`}
                       >
