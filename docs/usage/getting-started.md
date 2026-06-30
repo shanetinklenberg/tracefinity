@@ -27,6 +27,8 @@ Without an API key, tracing uses a local model (IS-Net by default). See [tracing
 5. Tracing starts automatically. The AI generates silhouette masks for each tool, typically in a few seconds.
 6. Click to select which traced tools to keep. Selected tools are saved to your library.
 
+**Mobile capture:** You can also use your phone's camera. Click **"Start Mobile Capture Session"** on the home page, scan the QR code with your phone, and take the photo from your phone. The photo uploads directly into the desktop session. See [uploading-photos.md](uploading-photos.md#mobile-capture) for details.
+
 The paper is for scale only. Tools can extend beyond the paper edges and will still be traced.
 
 From there, edit outlines in the tool editor, add cutouts, then drop tools into a bin and export STL or 3MF for printing.

@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+import socket
 import uuid
 import zipfile
 from datetime import datetime
@@ -499,21 +500,69 @@ def _run_generate(
     )
 
 
+@router.post("/sessions")
+async def create_session(
+    request: Request,
+    user_id: str = Depends(get_user_id),
+    webhook_url: str | None = Form(None),
+    webhook_metadata: str | None = Form(None),
+):
+    """create a pending session (no image yet).  the returned session_id can
+    be passed to POST /api/upload to fill in the image when the mobile
+    capture page sends it."""
+    user_sessions, _, _ = get_stores(user_id)
+    session_id = str(uuid.uuid4())
+
+    parsed_metadata: dict | None = None
+    if webhook_metadata:
+        try:
+            parsed_metadata = json.loads(webhook_metadata)
+            if not isinstance(parsed_metadata, dict):
+                raise HTTPException(status_code=400, detail="webhook_metadata must be a JSON object")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="webhook_metadata must be valid JSON")
+
+    user_sessions.set(session_id, Session(
+        id=session_id,
+        created_at=datetime.utcnow().isoformat(),
+        webhook_url=webhook_url,
+        webhook_metadata=parsed_metadata,
+    ))
+
+    return {"session_id": session_id}
+
+
 @router.post("/upload", response_model=UploadResponse)
 async def upload_image(
     request: Request,
     image: UploadFile,
     user_id: str = Depends(get_user_id),
+    session_id: str | None = Form(None),
     webhook_url: str | None = Form(None),
     webhook_metadata: str | None = Form(None),
 ):
+    """upload an image and create (or fill) a trace session.
+
+    if *session_id* is provided the image is written into that pre‑created
+    session (from POST /api/sessions).  the session must exist and not
+    already have an image.
+    """
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="file must be an image")
 
     user_sessions, _, _ = get_stores(user_id)
     up = _user_path(user_id)
 
-    session_id = str(uuid.uuid4())
+    if session_id:
+        existing = user_sessions.get(session_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="session not found")
+        if existing.original_image_path:
+            raise HTTPException(status_code=409, detail="session already has an image")
+    else:
+        existing = None
+        session_id = str(uuid.uuid4())
+
     ext = Path(image.filename or "image.jpg").suffix.lower() or ".jpg"
     if ext not in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported image format")
@@ -539,13 +588,24 @@ async def upload_image(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="webhook_metadata must be valid JSON")
 
+    # preserve created_at / webhook from the pre-existing session if reusing one
+    reusing = existing is not None
+    created_at = existing.created_at if reusing else datetime.utcnow().isoformat()
+    inherit_webhook_url = existing.webhook_url if reusing else None
+    inherit_webhook_metadata = existing.webhook_metadata if reusing else None
+
+    # use explicit None checks for webhook fields so valid empty values
+    # (empty string "" or empty object {}) are not silently dropped.
+    final_webhook_url = webhook_url if webhook_url is not None else inherit_webhook_url
+    final_webhook_metadata = parsed_metadata if parsed_metadata is not None else inherit_webhook_metadata
+
     user_sessions.set(session_id, Session(
         id=session_id,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=created_at,
         original_image_path=_rel(image_path, up),
         corners=corner_points,
-        webhook_url=webhook_url,
-        webhook_metadata=parsed_metadata,
+        webhook_url=final_webhook_url,
+        webhook_metadata=final_webhook_metadata,
     ))
 
     return UploadResponse(
@@ -612,6 +672,154 @@ async def get_marker_sheet(paper_size: PaperSize):
             )
         },
     )
+
+
+@router.get("/server-info")
+async def get_server_info(request: Request):
+    """return the machine's hostname and LAN IP for constructing
+    phone-reachable URLs (QR code capture page).
+
+    resolution order:
+    1. TRACEFINITY_HOST / TRACEFINITY_HOSTNAME env vars (Docker — set by
+       docker-up.sh or user to inject the real host details)
+    2. request Host header (when the user already accesses via LAN IP)
+    3. OS hostname + LAN IP detection (bare-metal / local dev)
+
+    hostnames are returned *without* the .local suffix so the frontend can
+    append it consistently for mDNS / Bonjour:
+      http://<hostname>.local:<port>/capture
+    """
+    hostname: str | None = None
+    lan_ip: str | None = None
+
+    # 1. explicit env var overrides
+    env_host = os.environ.get("TRACEFINITY_HOST")
+    env_hostname = os.environ.get("TRACEFINITY_HOSTNAME")
+
+    if env_hostname:
+        hostname = env_hostname
+        if hostname.endswith(".local"):
+            hostname = hostname[:-6]
+    if env_host:
+        # might be a hostname or an IP — check
+        if _looks_like_ip(env_host):
+            lan_ip = env_host
+        elif not hostname:
+            hostname = env_host
+            if hostname.endswith(".local"):
+                hostname = hostname[:-6]
+
+    # 2. extract hostname / IP from the incoming request's Host header
+    if not hostname or not lan_ip:
+        req_host = request.headers.get("host", "")
+        if req_host:
+            req_host = req_host.split(":")[0]
+            if req_host and not _is_local_or_container(req_host):
+                if _looks_like_ip(req_host):
+                    if not lan_ip:
+                        lan_ip = req_host
+                else:
+                    if not hostname:
+                        hostname = req_host
+                        if hostname.endswith(".local"):
+                            hostname = hostname[:-6]
+
+    # 3. OS-level detection (bare metal / local dev)
+    if not hostname:
+        hn = socket.gethostname()
+        if hn.endswith(".local"):
+            hn = hn[:-6]
+        # container hostnames are 12-char hex ids — discard
+        if not _is_container_hostname(hn):
+            hostname = hn
+
+    if not lan_ip:
+        lan_ip = _detect_lan_ip()
+        # Docker bridge IPs (172.x) aren't useful to phones; try the
+        # Docker host gateway instead
+        if lan_ip and lan_ip.startswith("172."):
+            gw = _docker_gateway()
+            if gw:
+                lan_ip = gw
+            else:
+                lan_ip = None
+
+    return {
+        "hostname": hostname,
+        "lan_ip": lan_ip,
+    }
+
+
+def _is_local_or_container(host: str) -> bool:
+    """true if *host* is localhost or looks like a Docker container id."""
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return True
+    if re.fullmatch(r"[0-9a-f]{12}", host):
+        return True
+    return False
+
+
+def _is_container_hostname(hostname: str) -> bool:
+    """true if *hostname* looks like a Docker container id."""
+    return bool(re.fullmatch(r"[0-9a-f]{12}", hostname))
+
+
+def _looks_like_ip(s: str) -> bool:
+    """true if *s* looks like an IPv4 address."""
+    return bool(re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", s))
+
+
+def _detect_lan_ip() -> str | None:
+    """return the first non-loopback IPv4 address on this machine."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.05)
+        try:
+            s.connect(("10.255.255.255", 1))
+            ip = s.getsockname()[0]
+            if ip != "127.0.0.1":
+                return ip
+        except OSError:
+            pass
+        finally:
+            s.close()
+    except OSError:
+        pass
+
+    try:
+        for if_name in socket.if_nameindex():
+            try:
+                addrs = socket.getaddrinfo(if_name[1], None, socket.AF_INET)
+                for addr in addrs:
+                    ip = addr[4][0]
+                    if ip != "127.0.0.1":
+                        return ip
+            except OSError:
+                continue
+    except (OSError, AttributeError):
+        pass
+
+    return None
+
+
+def _docker_gateway() -> str | None:
+    """return the Docker host gateway IP from /proc/net/route, or None."""
+    try:
+        with open("/proc/net/route") as f:
+            for line in f:
+                fields = line.strip().split()
+                if len(fields) >= 11 and fields[1] == "00000000":
+                    gw_hex = fields[2]
+                    if len(gw_hex) == 8:
+                        gw = ".".join(
+                            str(int(gw_hex[i:i+2], 16))
+                            for i in (6, 4, 2, 0)
+                        )
+                        if gw != "0.0.0.0":
+                            return gw
+    except (OSError, IOError):
+        pass
+    return None
 
 
 @router.get("/api-keys")
@@ -846,6 +1054,10 @@ async def update_session(request: Request, session_id: str, req: SessionUpdateRe
         session.webhook_url = req.webhook_url
     if req.webhook_metadata is not None:
         session.webhook_metadata = req.webhook_metadata
+    if "next_session_id" in req.model_fields_set:
+        session.next_session_id = req.next_session_id
+    if "tools_saved_at" in req.model_fields_set:
+        session.tools_saved_at = req.tools_saved_at
     user_sessions.set(session_id, session)
     return StatusResponse(status="ok")
 

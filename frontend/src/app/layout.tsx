@@ -21,14 +21,20 @@ export default function RootLayout({
   const [showHelp, setShowHelp] = useState(false)
   const pathname = usePathname()
 
-  const isFullBleed = /^\/(trace|tools|bins)\//.test(pathname)
+  const isFullBleed = /^\/(trace|tools|bins)\//.test(pathname) || pathname === '/capture' || pathname === '/capture/setup'
 
   return (
     <html lang="en">
       <head>
         <title>Tracefinity</title>
         <meta name="description" content="Generate gridfinity bins from photos of tools" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="theme-color" content="#0c0e12" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="bg-base text-text-primary min-h-screen">
         <QueryClientProvider client={queryClient}>
