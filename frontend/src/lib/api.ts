@@ -247,10 +247,17 @@ export function getToolSvgUrl(toolId: string): string {
   return `${API_URL}/api/files/tools/${toolId}/tool.svg`
 }
 
-export async function saveToolsFromSession(sessionId: string, polygonIds?: string[]): Promise<string[]> {
+export async function saveToolsFromSession(
+  sessionId: string,
+  polygonIds?: string[],
+  labels?: Record<string, string>,
+): Promise<string[]> {
+  const body: Record<string, unknown> = {}
+  if (polygonIds) body.polygon_ids = polygonIds
+  if (labels) body.labels = labels
   const res = await fetchApi<{ tool_ids: string[] }>(`/api/sessions/${sessionId}/save-tools`, {
     method: 'POST',
-    body: polygonIds ? JSON.stringify({ polygon_ids: polygonIds }) : undefined,
+    body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
   })
   return res.tool_ids
 }

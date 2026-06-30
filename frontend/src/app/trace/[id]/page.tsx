@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
-import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Smartphone, Home, ScanLine, Image } from 'lucide-react'
+import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Smartphone, Home, Pencil, ScanLine, Image } from 'lucide-react'
 import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
 import { SessionInfo } from '@/components/SessionInfo'
@@ -36,6 +36,66 @@ const TRACE_STEPS = [
   'Tracing contours...',
   'Identifying tools...',
 ]
+
+function EditableLabel({
+  value,
+  onCommit,
+  isRenamed,
+}: {
+  value: string
+  onCommit: (newValue: string) => void
+  isRenamed: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { setDraft(value) }, [value])
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+
+  function commit() {
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== value) onCommit(trimmed)
+    else setDraft(value)
+  }
+
+  function handleDoubleClick(e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditing(true)
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') { setDraft(value); setEditing(false) }
+        }}
+        onClick={e => e.stopPropagation()}
+        className="text-xs bg-elevated border border-accent rounded px-1 py-0 text-text-primary outline-none min-w-[60px]"
+        style={{ width: `${Math.max(60, draft.length * 8)}px` }}
+      />
+    )
+  }
+
+  return (
+    <span
+      onDoubleClick={handleDoubleClick}
+      className={`truncate select-none ${isRenamed ? 'text-accent' : ''}`}
+      title={isRenamed ? 'Custom name' : 'Double-click to rename'}
+    >
+      {value}
+    </span>
+  )
+}
 
 export default function TracePage() {
   const router = useRouter()
@@ -75,6 +135,7 @@ export default function TracePage() {
   const [saved, setSaved] = useState(false)
   const [creatingNewSession, setCreatingNewSession] = useState(false)
   const [includedPolygons, setIncludedPolygons] = useState<Set<string>>(new Set())
+  const [polygonLabels, setPolygonLabels] = useState<Record<string, string>>({})
   const [hoveredPolygon, setHoveredPolygon] = useState<string | null>(null)
   const maskInputRef = useRef<HTMLInputElement>(null)
   const statusInterval = useRef<NodeJS.Timeout | null>(null)
@@ -177,6 +238,7 @@ export default function TracePage() {
             tid,
           )
           setPolygons(traceResult.polygons)
+          setPolygonLabels({})
           if (traceResult.mask_url) {
             setMaskUrl(traceResult.mask_url)
             setMaskVersion(v => v + 1)
@@ -226,6 +288,7 @@ export default function TracePage() {
         tid || undefined,
       )
       setPolygons(result.polygons)
+      setPolygonLabels({})
       if (result.mask_url) {
         setMaskUrl(result.mask_url)
         setMaskVersion((v) => v + 1)
@@ -250,6 +313,7 @@ export default function TracePage() {
     try {
       const result = await traceFromMask(sessionId, file)
       setPolygons(result.polygons)
+      setPolygonLabels({})
       if (result.mask_url) {
         setMaskUrl(result.mask_url)
         setMaskVersion((v) => v + 1)
@@ -328,7 +392,8 @@ export default function TracePage() {
     setSaving(true)
     setError(null)
     try {
-      await saveToolsFromSession(sessionId, Array.from(includedPolygons))
+      const labelsToSend = Object.keys(polygonLabels).length > 0 ? polygonLabels : undefined
+      await saveToolsFromSession(sessionId, Array.from(includedPolygons), labelsToSend)
       setSaved(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to save tools')
@@ -337,9 +402,11 @@ export default function TracePage() {
     }
   }
 
+  const now = new Date().toISOString()
+
   async function handleReturnHome() {
     try {
-      await updateSession(sessionId, { tools_saved_at: new Date().toISOString() })
+      await updateSession(sessionId, { tools_saved_at: now })
     } catch { /* non-critical */ }
     router.push('/')
   }
@@ -351,7 +418,7 @@ export default function TracePage() {
       // Mark current session complete and link the new one so the
       // mobile page follows automatically.
       await updateSession(sessionId, {
-        tools_saved_at: new Date().toISOString(),
+        tools_saved_at: now,
         next_session_id: session_id,
       })
       router.push(`/capture/setup?session=${session_id}`)
@@ -660,6 +727,8 @@ export default function TracePage() {
                 <div className="text-xs space-y-0.5">
                   {polygons.map((p) => {
                     const isIncluded = includedPolygons.has(p.id)
+                    const displayLabel = polygonLabels[p.id] ?? p.label
+                    const isRenamed = polygonLabels[p.id] !== undefined
                     return (
                       <div
                         key={p.id}
@@ -669,7 +738,7 @@ export default function TracePage() {
                           else next.add(p.id)
                           setIncludedPolygons(next)
                         }}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                        className={`group flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
                           isIncluded
                             ? 'bg-accent-muted text-accent'
                             : hoveredPolygon === p.id
@@ -682,7 +751,28 @@ export default function TracePage() {
                         }`}>
                           {isIncluded && <Check className="w-2.5 h-2.5 text-white" />}
                         </div>
-                        <span className="truncate">{p.label}</span>
+                        <EditableLabel
+                          value={displayLabel}
+                          isRenamed={isRenamed}
+                          onCommit={(newLabel) => {
+                            setPolygonLabels(prev => ({
+                              ...prev,
+                              [p.id]: newLabel,
+                            }))
+                          }}
+                        />
+                        <Pencil
+                          className="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer transition-opacity"
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation()
+                            // trigger edit via hidden click on the EditableLabel's span
+                            const span = (e.currentTarget as HTMLElement).previousElementSibling?.querySelector('span')
+                            if (span) {
+                              const dblClick = new MouseEvent('dblclick', { bubbles: true })
+                              span.dispatchEvent(dblClick)
+                            }
+                          }}
+                        />
                       </div>
                     )
                   })}

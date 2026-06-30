@@ -310,6 +310,7 @@ class ToolListResponse(BaseModel):
 
 class SaveToolsRequest(BaseModel):
     polygon_ids: list[str] | None = None
+    labels: dict[str, str] | None = None  # polygon_id -> user-provided label
 
 
 class SaveToolsResponse(BaseModel):
