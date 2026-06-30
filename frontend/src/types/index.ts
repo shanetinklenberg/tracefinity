@@ -61,6 +61,7 @@ export interface Session {
   layout: Layout | null
   tools_saved_at: string | null
   next_session_id: string | null
+  detection_method: DetectionMethod | null
 }
 
 export interface SessionSummary {
@@ -74,10 +75,13 @@ export interface SessionSummary {
   has_stl: boolean
 }
 
+export type DetectionMethod = 'fiducial' | 'visual'
+
 export interface UploadResponse {
   session_id: string
   image_url: string
   detected_corners: Point[] | null
+  detection_method: DetectionMethod | null
 }
 
 export interface CornersResponse {

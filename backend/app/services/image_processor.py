@@ -130,7 +130,9 @@ class ImageProcessor:
         _, mask = cv2.threshold(alpha, 127, 255, cv2.THRESH_BINARY)
         return mask
 
-    def detect_fiducial_markers(self, image: str | np.ndarray) -> list[tuple[float, float]] | None:
+    def detect_fiducial_markers(
+        self, image: str | np.ndarray, paper_size: PaperSize = "letter",
+    ) -> list[tuple[float, float]] | None:
         """detect paper corners using ArUco fiducial markers at the four corners.
 
         *image* may be a path to an image file or a pre-loaded BGR numpy array.
@@ -148,6 +150,14 @@ class ImageProcessor:
         aruco_dict = cv2.aruco.getPredefinedDictionary(_ARUCO_DICT)
         aruco_params = cv2.aruco.DetectorParameters()
 
+        # tune detection for small printed markers in varied lighting
+        aruco_params.adaptiveThreshWinSizeMin = 3
+        aruco_params.adaptiveThreshWinSizeMax = 31
+        aruco_params.adaptiveThreshWinSizeStep = 4
+        aruco_params.minMarkerPerimeterRate = 0.02
+        aruco_params.polygonalApproxAccuracyRate = 0.05
+        aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+
         try:
             detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
             corners_list, ids, _rejected = detector.detectMarkers(gray)
@@ -157,19 +167,24 @@ class ImageProcessor:
             )
 
         if ids is None or len(ids) < 4:
-            logger.debug("fiducial detection: found %d markers, need 4", len(ids) if ids is not None else 0)
+            logger.info(
+                "fiducial detection: found %d markers, need 4",
+                len(ids) if ids is not None else 0,
+            )
             return None
 
-        return self._marker_corners_from_detections(corners_list, ids)
+        logger.info("fiducial detection: found %d markers (IDs: %s)", len(ids), sorted(ids.flatten()))
+        return self._marker_corners_from_detections(corners_list, ids, paper_size)
 
     def _marker_corners_from_detections(
         self,
         corners_list: list[np.ndarray],
         ids: np.ndarray,
+        paper_size: PaperSize = "letter",
     ) -> list[tuple[float, float]] | None:
         """map detected ArUco marker centres to paper corner positions.
 
-        four marker centres in the image and their known positions on A4
+        four marker centres in the image and their known positions on the
         paper define a perspective transform.  the inverse maps the paper
         corners back to image pixels.  orientation is recovered from the
         marker quad's true aspect ratio to survive foreshortening.
@@ -212,7 +227,7 @@ class ImageProcessor:
             [(float(p[0]), float(p[1])) for p in src_ordered], principal
         )
 
-        w_mm, h_mm = PAPER_SIZES["a4"]  # 210 × 297 portrait
+        w_mm, h_mm = PAPER_SIZES[paper_size]
         if estimated is not None and estimated > 0:
             ratio = w_mm / h_mm
             if abs(math.log(estimated / ratio)) > abs(math.log(estimated * ratio)):
@@ -254,19 +269,24 @@ class ImageProcessor:
             for i in range(4)
         ]
 
-    def detect_paper_corners(self, image_path: str) -> list[tuple[float, float]] | None:
+    def detect_paper_corners(
+        self, image_path: str, paper_size: PaperSize = "letter",
+    ) -> tuple[list[tuple[float, float]] | None, str | None]:
         """detect paper corners using fiducial markers first, falling back to
-        visual paper boundary detection."""
+        visual paper boundary detection.
+
+        returns (corners, detection_method) where detection_method is
+        "fiducial", "visual", or None (if no corners found)."""
         img = cv2.imread(image_path)
         if img is None:
-            return None
+            return None, None
 
         # attempt 1: fiducial markers (reuse already-loaded img)
         try:
-            marker_corners = self.detect_fiducial_markers(img)
+            marker_corners = self.detect_fiducial_markers(img, paper_size)
             if marker_corners is not None:
                 logger.info("paper corners detected via ArUco fiducial markers")
-                return marker_corners
+                return marker_corners, "fiducial"
         except Exception:
             logger.warning(
                 "fiducial marker detection raised exception, falling back",
@@ -278,7 +298,9 @@ class ImageProcessor:
         tool_mask = self._get_tool_mask(image_path)
         img[tool_mask > 0] = [0, 0, 0]
 
-        return self._detect_paper(img)
+        visual_corners = self._detect_paper(img)
+        method = "visual" if visual_corners is not None else None
+        return visual_corners, method
 
     def _detect_paper(self, img: np.ndarray) -> list[tuple[float, float]] | None:
         """core paper detection on an image (possibly with tools blacked out)."""

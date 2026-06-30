@@ -576,7 +576,7 @@ async def upload_image(
     image_path = up / "uploads" / f"{session_id}{ext}"
     image_path.write_bytes(content)
 
-    corners = image_processor.detect_paper_corners(str(image_path))
+    corners, detection_method = image_processor.detect_paper_corners(str(image_path))
     corner_points = [Point(x=c[0], y=c[1]) for c in corners] if corners else None
 
     parsed_metadata: dict | None = None
@@ -606,12 +606,14 @@ async def upload_image(
         corners=corner_points,
         webhook_url=final_webhook_url,
         webhook_metadata=final_webhook_metadata,
+        detection_method=detection_method,
     ))
 
     return UploadResponse(
         session_id=session_id,
         image_url=f"/storage/{user_id}/uploads/{session_id}{ext}",
         detected_corners=corner_points,
+        detection_method=detection_method,
     )
 
 

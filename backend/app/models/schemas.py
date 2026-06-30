@@ -42,10 +42,14 @@ class Polygon(BaseModel):
     interior_rings: list[list[Point]] = []
 
 
+DetectionMethod = Literal["fiducial", "visual"]
+
+
 class UploadResponse(BaseModel):
     session_id: str
     image_url: str
     detected_corners: list[Point] | None
+    detection_method: DetectionMethod | None = None
 
 
 class CornersRequest(BaseModel):
@@ -199,6 +203,7 @@ class Session(BaseModel):
     webhook_metadata: dict[str, Any] | None = None
     tools_saved_at: str | None = None
     next_session_id: str | None = None
+    detection_method: DetectionMethod | None = None
 
 
 class SessionSummary(BaseModel):

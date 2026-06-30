@@ -235,7 +235,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const { deleteTarget: deleteModal, requestDelete, clearDelete } = useDeleteConfirmation<{ type: 'tool' | 'bin' | 'project'; id: string }>()
   const [creatingBin, setCreatingBin] = useState<string | null>(null)
-  const [sheetPaperSize, setSheetPaperSize] = useState<PaperSize>('a4')
+  const [sheetPaperSize, setSheetPaperSize] = useState<PaperSize>('letter')
   const [nameModal, setNameModal] = useState<{ toolIds?: string[] } | null>(null)
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')

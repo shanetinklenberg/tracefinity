@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
-import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Smartphone, Home } from 'lucide-react'
+import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Smartphone, Home, ScanLine, Image } from 'lucide-react'
 import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
 import { SessionInfo } from '@/components/SessionInfo'
@@ -11,7 +11,7 @@ import { Alert } from '@/components/Alert'
 import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession, createCaptureSession, API_URL } from '@/lib/api'
 import { CornersHint, TraceHint, EditHint } from '@/components/OnboardingIllustrations'
 import { StepBar } from '@/components/StepBar'
-import type { PaperSize, Point, Polygon, Session } from '@/types'
+import type { PaperSize, Point, Polygon, Session, DetectionMethod } from '@/types'
 
 type Step = 'corners' | 'trace' | 'edit'
 
@@ -49,7 +49,7 @@ export default function TracePage() {
   const [error, setError] = useState<string | null>(null)
 
   const [corners, setLocalCorners] = useState<Point[]>([])
-  const [paperSize, setPaperSize] = useState<PaperSize>('a4')
+  const [paperSize, setPaperSize] = useState<PaperSize>('letter')
   const [imageUrl, setImageUrl] = useState<string>('')
   const [correctedImageUrl, setCorrectedImageUrl] = useState<string>('')
   const [polygons, setPolygons] = useState<Polygon[]>([])
@@ -68,6 +68,7 @@ export default function TracePage() {
   const [imageVersion, setImageVersion] = useState(Date.now())
   const [copied, setCopied] = useState(false)
   const [showPrompt, setShowPrompt] = useState(false)
+  const [detectionMethod, setDetectionMethod] = useState<DetectionMethod | null>(null)
   const [traceStatus, setTraceStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -106,6 +107,9 @@ export default function TracePage() {
 
         if (s.corners) {
           setLocalCorners(s.corners)
+        }
+        if (s.detection_method) {
+          setDetectionMethod(s.detection_method)
         }
         if (s.paper_size) {
           setPaperSize(s.paper_size)
@@ -404,6 +408,25 @@ export default function TracePage() {
               <p className="text-xs text-text-muted">
                 Drag the corner handles to match the paper edges.
               </p>
+
+              {detectionMethod && (
+                <div className={`flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-lg ${
+                  detectionMethod === 'fiducial'
+                    ? 'bg-accent/10 text-accent'
+                    : 'bg-amber-500/10 text-amber-400'
+                }`}>
+                  {detectionMethod === 'fiducial' ? (
+                    <ScanLine className="w-3.5 h-3.5" />
+                  ) : (
+                    <Image className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {detectionMethod === 'fiducial'
+                      ? 'Fiducial markers detected'
+                      : 'Paper edges detected (no fiducials)'}
+                  </span>
+                </div>
+              )}
 
               <div>
                 <span className="text-xs text-text-primary tracking-[0.3px]">Paper Size</span>
