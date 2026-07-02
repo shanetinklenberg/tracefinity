@@ -6,7 +6,7 @@ import { BinEditor } from '@/components/BinEditor'
 import { BinConfigurator, calcMaxCutoutDepth } from '@/components/BinConfigurator'
 import { BinPreview3D } from '@/components/BinPreview3D'
 import { ToolBrowser } from '@/components/ToolBrowser'
-import { getBin, updateBin, generateBinStl, getBinStlUrl, getBinZipUrl, getBinThreemfUrl, getBinInsertUrl, getImageUrl, listTools, updateTool } from '@/lib/api'
+import { getBin, updateBin, generateBinStl, getBinStlUrl, getBinZipUrl, getBinThreemfUrl, getBinInsertUrl, getBinStepUrl, getImageUrl, listTools, updateTool } from '@/lib/api'
 import { getDefaultBinConfig, resetDefaultBinConfig, saveDefaultBinConfig } from '@/lib/binDefaults'
 import type { BinConfig, BinData, PlacedTool, TextLabel } from '@/types'
 import { Download, Loader2, Package, ChevronDown, Check } from 'lucide-react'
@@ -38,6 +38,7 @@ export default function BinPage() {
   const [stlUrl, setStlUrl] = useState<string | null>(null)
   const [stlUrls, setStlUrls] = useState<string[]>([])
   const [threemfUrl, setThreemfUrl] = useState<string | null>(null)
+  const [stepUrl, setStepUrl] = useState<string | null>(null)
   const [zipUrl, setZipUrl] = useState<string | null>(null)
   const [insertStlUrl, setInsertStlUrl] = useState<string | null>(null)
   const [splitCount, setSplitCount] = useState(1)
@@ -131,6 +132,7 @@ export default function BinPage() {
     setStlUrl(null)
     setStlUrls([])
     setThreemfUrl(null)
+    setStepUrl(null)
     setZipUrl(null)
     setInsertStlUrl(null)
 
@@ -142,6 +144,7 @@ export default function BinPage() {
       setStlUrl(getImageUrl(result.stl_url))
       setStlUrls((result.stl_urls || []).map(u => getImageUrl(u)))
       setThreemfUrl(result.threemf_url ? getImageUrl(result.threemf_url) : null)
+      setStepUrl(result.step_url ? getImageUrl(result.step_url) : null)
       setZipUrl(result.zip_url ? getImageUrl(result.zip_url) : null)
       setInsertStlUrl(result.insert_stl_url ? getImageUrl(result.insert_stl_url) : null)
       setSplitCount(result.split_count || 1)
@@ -316,6 +319,10 @@ export default function BinPage() {
     window.open(getBinInsertUrl(binId), '_blank')
   }
 
+  function handleDownloadStep() {
+    window.open(getBinStepUrl(binId), '_blank')
+  }
+
   function showDefaultsStatus(message: string) {
     if (defaultsStatusTimeoutRef.current) clearTimeout(defaultsStatusTimeoutRef.current)
     setDefaultsStatus(message)
@@ -358,7 +365,7 @@ export default function BinPage() {
   const binW = config.grid_x * GRID_UNIT
   const binH = config.grid_y * GRID_UNIT
   const effectiveRimUnits = config.stacking_lip ? config.rim_units : 0
-  const hasExports = stlUrl || zipUrl || threemfUrl || insertStlUrl
+  const hasExports = stlUrl || zipUrl || threemfUrl || stepUrl || insertStlUrl
 
   return (
     <div className="h-[calc(100vh-44px)] flex">
@@ -464,6 +471,15 @@ export default function BinPage() {
                     >
                       <Package className="w-3 h-3" />
                       Insert STL
+                    </button>
+                  )}
+                  {stepUrl && (
+                    <button
+                      onClick={() => { handleDownloadStep(); setExportOpen(false) }}
+                      className="w-full text-left px-3 py-1.5 text-[11px] text-text-secondary hover:bg-glass-hover hover:text-text-primary transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      <Package className="w-3 h-3" />
+                      STEP
                     </button>
                   )}
                 </div>

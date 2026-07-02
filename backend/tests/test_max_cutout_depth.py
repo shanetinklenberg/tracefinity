@@ -1,5 +1,5 @@
-"""Tests for max cutout depth calculation in stl_generator_manifold."""
-from app.services.stl_generator_manifold import (
+"""Tests for max cutout depth calculation in stl_generator_cq."""
+from app.services.stl_generator_cq import (
     GF_BASE_HEIGHT,
     GF_HEIGHT_UNIT,
     LIP_D3,

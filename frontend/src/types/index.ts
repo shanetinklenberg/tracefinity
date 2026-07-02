@@ -98,6 +98,7 @@ export interface GenerateResponse {
   stl_url: string
   stl_urls?: string[]
   threemf_url?: string
+  step_url?: string | null
   split_count?: number
   zip_url?: string | null
   insert_stl_url?: string | null
@@ -122,6 +123,14 @@ export interface BinDefaults {
   insert_height: number
   insert_clearance: number
   bed_size: number
+  // cq-gridfinity features
+  scoops: boolean
+  scoop_rad: number
+  front_label: boolean
+  label_width: number
+  length_div: number
+  width_div: number
+  lite_style: boolean
 }
 
 export interface BinConfig extends BinDefaults {

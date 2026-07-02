@@ -35,7 +35,7 @@ tracefinity/
 │   │       ├── ai_tracer.py              # Gemini mask + contour tracing
 │   │       ├── image_processor.py         # paper detection + perspective
 │   │       ├── polygon_scaler.py          # px-to-mm, clearance, smoothing
-│   │       ├── stl_generator_manifold.py  # gridfinity STL + bin splitting
+│   │       ├── stl_generator_cq.py        # gridfinity STL + bin splitting (CadQuery/cq-gridfinity)
 │   │       ├── bin_service.py             # placed-tool sync logic
 │   │       ├── image_service.py           # tool thumbnail generation
 │   │       ├── session_store.py

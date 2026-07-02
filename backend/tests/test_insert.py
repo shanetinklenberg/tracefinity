@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from app.services.stl_generator_manifold import ManifoldSTLGenerator
+from app.services.stl_generator_cq import CQGridfinityGenerator
 from app.services.polygon_scaler import ScaledPolygon
 
 GF_GRID = 42.0
@@ -38,7 +38,7 @@ def _grid_offsets(grid_x=2, grid_y=2):
 
 @pytest.fixture
 def generator():
-    return ManifoldSTLGenerator()
+    return CQGridfinityGenerator()
 
 
 @pytest.fixture

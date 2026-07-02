@@ -12,6 +12,7 @@ import numpy as np
 
 from app.models.schemas import GenerateRequest
 from app.services.polygon_scaler import ScaledPolygon
+from app.services.stl_generator_base import BinGenerator, GeneratorCapability
 
 logger = logging.getLogger(__name__)
 
@@ -153,13 +154,7 @@ def _build_stacking_lip_notch(outer_w: float, outer_h: float):
 
 
 def _build_shell(config: GenerateRequest):
-    """Solid bin shell: base units + wall body to wall_top_z.
-
-    Wall body terminates at wall_top_z only. The stacking lip is built
-    separately in generate_bin and added on top, matching the original
-    gf.Bin + StackingLip structure so the groove is only visible above
-    wall_top_z and the large top-floor face is preserved.
-    """
+    """Solid bin shell: base units + wall body to wall_top_z."""
     import manifold3d as mf
 
     grid_x, grid_y = config.grid_x, config.grid_y
@@ -223,8 +218,6 @@ def _rounded_bottom_rect_profile_pts(
     n = max(4, segs // 8)
     pts: list[tuple[float, float]] = []
 
-    # Start at the bottom-right floor point. Closing the polygon creates the
-    # flat floor segment back from the bottom-left point.
     pts.append((hw - r, 0.0))
 
     right_cx, right_cy = hw - r, r
@@ -283,7 +276,6 @@ def _make_magnet_holes(config: GenerateRequest):
     r = diameter / 2
     mag = mf.Manifold.cylinder(depth + 0.01, r, circular_segments=ROUND_SEGS)
 
-    # corners that sit on the outer bin boundary
     outer_corners = set()
     if corners_only:
         for ix, iy, dx, dy in [
@@ -311,16 +303,7 @@ def _make_magnet_holes(config: GenerateRequest):
 
 
 def _shapely_to_cross_sections(shifted_pts: list[tuple], interior_rings: list[list[tuple]] = None) -> list[np.ndarray]:
-    """
-    Validate and repair a polygon via Shapely before passing to Clipper2.
-    Returns a list of ring arrays (exterior + hole rings for EvenOdd fill).
-
-    Two-stage repair:
-    1. buffer(0) for polygons that are already self-intersecting (GEOS-invalid)
-    2. morphological open (erode+dilate by _CLIP_EPS) to merge near-touching
-       edges that Clipper2's integer rounding would otherwise bridge — these
-       pass Shapely's validity check but still trigger the Clipper2 chord artifact.
-    """
+    """Validate and repair a polygon via Shapely before passing to Clipper2."""
     from shapely.geometry import Polygon as _SPoly, MultiPolygon as _SMPoly
 
     holes = interior_rings if interior_rings else []
@@ -329,9 +312,6 @@ def _shapely_to_cross_sections(shifted_pts: list[tuple], interior_rings: list[li
     if not sp.is_valid:
         sp = sp.buffer(0)
 
-    # morphological open: collapses thin peninsulas / near-touching edges
-    # 0.05mm is well below any meaningful feature size but larger than Clipper2
-    # integer-snapping distance (1e-6 mm at default 1e6 scale factor)
     _CLIP_EPS = 0.05
     cleaned = sp.buffer(-_CLIP_EPS).buffer(_CLIP_EPS)
     if not cleaned.is_empty and cleaned.area > sp.area * 0.9:
@@ -348,7 +328,6 @@ def _shapely_to_cross_sections(shifted_pts: list[tuple], interior_rings: list[li
         if p.is_empty or p.area <= 0:
             continue
         rings.append(np.array(p.exterior.coords[:-1], dtype=np.float64))
-        # include interior rings (holes) for EvenOdd fill
         for interior in p.interiors:
             hole_coords = interior.coords[:-1]
             if len(hole_coords) >= 3:
@@ -375,7 +354,6 @@ def _make_polygon_cutouts(
         ]
         if len(shifted) < 3:
             continue
-        # shift interior rings the same way
         shifted_holes = []
         for hole in (poly.interior_rings_mm or []):
             shifted_hole = [
@@ -390,7 +368,6 @@ def _make_polygon_cutouts(
                 continue
             has_holes = len(rings) > 1
             if has_holes:
-                # use EvenOdd to handle holes — same pattern as text labels
                 cs = mf.CrossSection(rings, mf.FillRule.EvenOdd)
             else:
                 cs = mf.CrossSection(rings)
@@ -419,15 +396,7 @@ def _make_chamfer_cutouts(
     offset_x: float,
     offset_y: float,
 ):
-    """Per-polygon frustum cutter for the top-edge chamfer.
-
-    Uses CrossSection.offset() for uniform chamfer width regardless of shape
-    or rotation, then extrudes with scale_top to taper from the offset shape
-    (at the bin surface) down to approximately the original shape.
-
-    Chamfer is clamped per-polygon to (pocket_depth - 1) so deep cutouts get
-    their full chamfer and shallow ones don't punch through the floor.
-    """
+    """Per-polygon frustum cutter for the top-edge chamfer."""
     import manifold3d as mf
 
     cutters = []
@@ -463,9 +432,6 @@ def _make_chamfer_cutouts(
             if cs.area() <= 0:
                 continue
 
-            # offset for uniform chamfer width regardless of shape/rotation.
-            # use the offset bounds to compute scale_top — more accurate
-            # than raw bounding-box math for rotated/irregular shapes.
             cs_outer = cs.offset(eff_chamfer, mf.JoinType.Round)
             if cs_outer.is_empty() or cs_outer.area() <= 0:
                 continue
@@ -477,14 +443,10 @@ def _make_chamfer_cutouts(
             iw = max(ib[2] - ib[0], 1e-6)
             ih = max(ib[3] - ib[1], 1e-6)
 
-            # centre at the original CS bounding-box midpoint so scale_top
-            # expands uniformly from the shape centre
             icx = (ib[0] + ib[2]) / 2
             icy = (ib[1] + ib[3]) / 2
             cs_centred = cs.translate((-icx, -icy))
 
-            # base = original shape (inside pocket), top = wider offset shape
-            # (bin surface). scale_top > 1 creates the taper.
             cutter = (
                 mf.Manifold.extrude(
                     cs_centred, eff_chamfer + 0.01,
@@ -509,10 +471,7 @@ def _make_finger_holes(
     offset_x: float,
     offset_y: float,
 ):
-    """Batch union of all finger hole cutters.
-
-    Per-feature depth: each hole resolves to its own depth_override, falling
-    back to the parent polygon's override, then the global cutout_depth."""
+    """Batch union of all finger hole cutters."""
     import manifold3d as mf
 
     cutters = []
@@ -529,8 +488,6 @@ def _make_finger_holes(
                     r = fh.radius_mm
                     pocket_floor_z = wall_top_z - pocket_depth
                     sphere_z = max(wall_top_z, pocket_floor_z + r)
-                    # approximate sphere as a cylinder with hemispheric top
-                    # using a simple cylinder for speed; close enough for slicer
                     cutter = mf.Manifold.sphere(r, circular_segments=ROUND_SEGS).translate(
                         (fh_x, fh_y, sphere_z)
                     )
@@ -583,10 +540,7 @@ def _make_finger_hole_chamfers(
     offset_x: float,
     offset_y: float,
 ):
-    """Chamfer cutters for finger holes (circles, squares, rectangles).
-
-    Per-feature: chamfer is clamped to (pocket_depth - 1) of each finger hole's
-    own depth (override → parent polygon override → global cutout_depth)."""
+    """Chamfer cutters for finger holes."""
     import manifold3d as mf
 
     cutters = []
@@ -625,8 +579,6 @@ def _make_finger_hole_chamfers(
                 if cs_outer.is_empty() or cs_outer.area() <= 0:
                     continue
 
-                # shapes are centred at origin, so scale_top from origin
-                # gives a perfect taper
                 ib = cs.bounds()
                 ob = cs_outer.bounds()
                 iw = max(ib[2] - ib[0], 1e-6)
@@ -716,7 +668,6 @@ def _text_to_cross_section(text: str, font_size_mm: float):
     if not polys:
         return None
 
-    # EvenOdd handles holes in letters (O, A, B, etc.) automatically
     cs = mf.CrossSection(polys, mf.FillRule.EvenOdd)
     return cs if cs.area() > 0 else None
 
@@ -744,11 +695,7 @@ def _make_text_labels(
     pocket_depth: float = 0,
     polygons: list = None,
 ):
-    """Build manifold solids for text labels. Returns (recessed_cutter, embossed_body).
-
-    Labels inside tool cutouts sit at the cutout floor. Labels on the bin
-    surface sit at wall_top_z.
-    """
+    """Build manifold solids for text labels. Returns (recessed_cutter, embossed_body)."""
     import manifold3d as mf
 
     recessed = []
@@ -766,7 +713,6 @@ def _make_text_labels(
             lx = tl.x + offset_x
             ly = -(tl.y + offset_y)
 
-            # determine if label centre is inside any tool cutout
             in_cutout = any(
                 _point_in_polygon(tl.x, tl.y, p.get("points", []))
                 for p in polys
@@ -802,9 +748,7 @@ def _make_text_labels(
 def _shrink_rings(
     pts: list[tuple], holes: list[list[tuple]], amount: float
 ) -> list[tuple[list[tuple], list[list[tuple]]]]:
-    """inward offset of a ring set. returns one ring set per resulting piece;
-    a narrow neck can split the shape and every piece must survive.
-    mitre join so convex corners stay sharp and match the pocket walls."""
+    """Inward offset of a ring set; returns one ring set per resulting piece."""
     from shapely.geometry import Polygon as _SPoly
     from shapely.validation import make_valid
 
@@ -836,10 +780,7 @@ def _manifold_to_trimesh(m):
     verts = mesh.vert_properties[:, :3].astype(np.float64)
     faces = mesh.tri_verts.astype(np.int64)
     tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
-    # merge near-duplicate vertices and drop degenerate faces that manifold
-    # boolean ops can introduce at intersection seams
     tm.merge_vertices()
-    # drop zero-area faces, then clean up orphaned vertices
     mask = tm.nondegenerate_faces()
     tm.update_faces(mask)
     tm.remove_unreferenced_vertices()
@@ -864,13 +805,27 @@ def _export_3mf(bin_m, text_m, path: str) -> None:
 
 # ── main generator class ──────────────────────────────────────────────────────
 
-class ManifoldSTLGenerator:
+class ManifoldSTLGenerator(BinGenerator):
+    @classmethod
+    def capabilities(cls) -> frozenset[GeneratorCapability]:
+        return frozenset({
+            GeneratorCapability.THREEMF,
+            GeneratorCapability.CHAMFER,
+            GeneratorCapability.BIN_SPLITTING,
+            GeneratorCapability.INSERT,
+            GeneratorCapability.TEXT_LABELS,
+            GeneratorCapability.CUSTOM_MAGNET_SIZE,
+            GeneratorCapability.RIM_UNITS,
+            # STEP_EXPORT, SCOOPS, DIVIDERS, LITE_STYLE not supported
+        })
+
     def generate_bin(
         self,
         polygons: list[ScaledPolygon],
         config: GenerateRequest,
         output_path: str,
         threemf_path: str | None = None,
+        step_path: str | None = None,  # accepted but unused; manifold has no OCCT
     ):
         """Generate bin STL using manifold3d. Returns (bin_manifold, text_manifold)."""
         import manifold3d as mf
@@ -883,7 +838,6 @@ class ManifoldSTLGenerator:
         offset_y = -bin_depth / 2
         wall_top_z = config.height_units * GF_HEIGHT_UNIT
 
-        # build solid shell (wall body to wall_top_z, no lip yet)
         t1 = time.monotonic()
         bin_body = _build_shell(config)
         logger.info("shell: %.2fs", time.monotonic() - t1)
@@ -891,16 +845,9 @@ class ManifoldSTLGenerator:
         outer_w = config.grid_x * GF_GRID - 0.5
         outer_h = config.grid_y * GF_GRID - 0.5
 
-        # raised rim ("collar"): a hollow perimeter wall extending the bin wall
-        # above the floor face (wall_top_z) without filling the interior.  A
-        # protruding tool sits in the open volume inside the collar, and the
-        # stacking lip (if enabled) rides on top so a stacked bin clears the
-        # tool.  Cutouts still pocket down from wall_top_z, unaffected by the rim.
         rim_units = (getattr(config, "rim_units", 0) or 0) if config.stacking_lip else 0
         rim_height = rim_units * GF_HEIGHT_UNIT
         lip_base_z = wall_top_z + rim_height
-        # inner opening matches the stacking-lip inner opening so the collar wall
-        # is flush with the lip's inner face (no inward overhang/ledge).
         rim_inner_w = outer_w - 2 * (LIP_D0 + LIP_D2)
         rim_inner_h = outer_h - 2 * (LIP_D0 + LIP_D2)
 
@@ -915,11 +862,6 @@ class ManifoldSTLGenerator:
             bin_body = bin_body + collar
             logger.info("raised rim (%du): %.2fs", rim_units, time.monotonic() - t1)
 
-        # stacking lip: build groove into a separate lip solid (z=lip_base_z to
-        # z=lip_base_z+lip_total) and add it to the bin body.  The notch extends
-        # below lip_base_z but only cuts the lip solid (not the wall/collar), so
-        # the groove is invisible below lip_base_z — matching gf.Bin behaviour
-        # and preserving the large top-floor face at z=wall_top_z.
         if config.stacking_lip:
             lip_total = LIP_D0 + LIP_D1 + LIP_D2
             notch_depth_below = LIP_D3 + LIP_D4
@@ -934,8 +876,6 @@ class ManifoldSTLGenerator:
             bin_body = bin_body + lip_with_groove
             logger.info("stacking lip: %.2fs", time.monotonic() - t1)
 
-        # collect remaining cutters (pocket, magnets, finger holes, text) and
-        # subtract them in one pass to avoid sequential z-plane imprecision
         cutters: list = []
 
         if config.magnets:
@@ -946,9 +886,6 @@ class ManifoldSTLGenerator:
             floor_z = GF_BASE_HEIGHT
             lip_deduction = (LIP_D3 + LIP_D4) if config.stacking_lip else 0
             max_depth = wall_top_z - floor_z - 2 - lip_deduction
-            # Default pocket_depth (used by text labels below) still tracks the
-            # global cutout_depth; per-cutout overrides are resolved inside the
-            # cutter functions via _resolve_pocket_depth.
             pocket_depth = _resolve_pocket_depth(None, config, max_depth)
 
             t1 = time.monotonic()
@@ -974,7 +911,6 @@ class ManifoldSTLGenerator:
                     cutters.append(fh_chamfers)
                 logger.info("chamfer cutouts: %.2fs", time.monotonic() - t1)
 
-        # text labels (recessed cutters + embossed body additions)
         text_body = None
         if config.text_labels:
             t1 = time.monotonic()
@@ -986,7 +922,6 @@ class ManifoldSTLGenerator:
                 text_body = embossed
             logger.info("text labels: %.2fs", time.monotonic() - t1)
 
-        # single boolean subtraction for all cutters
         if cutters:
             t1 = time.monotonic()
             all_cutters = mf.Manifold.batch_boolean(cutters, mf.OpType.Add)
@@ -995,7 +930,6 @@ class ManifoldSTLGenerator:
 
         logger.info("total generate_bin: %.2fs", time.monotonic() - t0)
 
-        # export STL
         t1 = time.monotonic()
         if text_body:
             combined = bin_body + text_body
@@ -1004,7 +938,6 @@ class ManifoldSTLGenerator:
             _export_stl(bin_body, output_path)
         logger.info("export_stl: %.2fs", time.monotonic() - t1)
 
-        # 3MF export (multi-colour)
         if text_body and threemf_path:
             try:
                 _export_3mf(bin_body, text_body, threemf_path)
@@ -1024,8 +957,6 @@ class ManifoldSTLGenerator:
         import manifold3d as mf
 
         insert_height = getattr(config, 'insert_height', 1.0)
-        # the insert must drop into the pocket cut from the same outline; FDM
-        # bias makes pockets undersized and positives oversized, so shrink
         fit_clearance = getattr(config, 'insert_clearance', 0.2)
         shapes = []
         failed = 0
@@ -1088,8 +1019,7 @@ class ManifoldSTLGenerator:
         if bed_size <= 0 or total_mm <= bed_size:
             return []
         max_units = max(1, int(bed_size // GF_GRID))
-        import math as _m
-        num_pieces = _m.ceil(grid_count / max_units)
+        num_pieces = math.ceil(grid_count / max_units)
         base = grid_count // num_pieces
         extra = grid_count % num_pieces
         sizes = [base + (1 if i < extra else 0) for i in range(num_pieces)]
@@ -1110,14 +1040,10 @@ class ManifoldSTLGenerator:
         session_id: str,
     ) -> list[str]:
         """Split completed bin into bed-sized pieces. Returns list of output paths."""
-        import manifold3d as mf
-        import math
-
         bin_width = config.grid_x * GF_GRID
         bin_depth = config.grid_y * GF_GRID
 
-        fits_diagonal = (bin_width + bin_depth) / math.sqrt(2) <= bed_size
-        if fits_diagonal:
+        if (bin_width + bin_depth) / math.sqrt(2) <= bed_size:
             return []
 
         x_cuts = self._compute_split_points(bin_width, config.grid_x, bed_size)
@@ -1146,7 +1072,6 @@ class ManifoldSTLGenerator:
         if not cut_points:
             return [part]
 
-        # normal vector for cut plane
         normal = (1.0, 0.0, 0.0) if axis == 'x' else (0.0, 1.0, 0.0)
         pieces = []
         remainder = part

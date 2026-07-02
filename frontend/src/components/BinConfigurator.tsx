@@ -328,6 +328,72 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
           </div>
         )}
       </div>
+
+      <div className="border-t border-border mt-2 pt-1">
+        <Toggle
+          checked={config.scoops}
+          onChange={(v) => update({ scoops: v })}
+          label="Finger Scoops"
+          help="Curved scoop on the back wall for easy tool removal."
+        />
+        {config.scoops && (
+          <div className="pl-3 border-l border-border-subtle ml-1 space-y-0">
+            <SliderRow
+              label="Scoop Radius"
+              value={config.scoop_rad}
+              min={5}
+              max={30}
+              step={0.5}
+              unit="mm"
+              onChange={(v) => update({ scoop_rad: v })}
+            />
+          </div>
+        )}
+        <Toggle
+          checked={config.front_label}
+          onChange={(v) => update({ front_label: v })}
+          label="Label Flange"
+          help="Front label slot for a paper or printed label strip."
+        />
+        {config.front_label && (
+          <div className="pl-3 border-l border-border-subtle ml-1 space-y-0">
+            <SliderRow
+              label="Label Width"
+              value={config.label_width}
+              min={5}
+              max={30}
+              step={0.5}
+              unit="mm"
+              onChange={(v) => update({ label_width: v })}
+            />
+          </div>
+        )}
+        <SliderRow
+          label="Dividers (length)"
+          help="Number of internal divider walls along the bin length."
+          value={config.length_div}
+          min={0}
+          max={9}
+          onChange={(v) => update({ length_div: v })}
+        />
+        <SliderRow
+          label="Dividers (width)"
+          help="Number of internal divider walls along the bin width."
+          value={config.width_div}
+          min={0}
+          max={9}
+          onChange={(v) => update({ width_div: v })}
+        />
+        <Toggle
+          checked={config.lite_style}
+          onChange={(v) => update({
+            lite_style: v,
+            ...(v ? { scoops: false, magnets: false, rim_units: 0 } : {}),
+          })}
+          label="Lite Style"
+          help="Thin-walled shell without elevated floor. Incompatible with scoops, magnets, and rim units."
+        />
+      </div>
     </div>
   )
 }

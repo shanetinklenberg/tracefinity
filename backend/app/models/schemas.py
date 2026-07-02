@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Any, Literal, Optional
 
 from app.constants import PaperSize
@@ -158,6 +158,42 @@ class BinParams(BaseModel):
             raise ValueError("wall thickness must be between 0.4 and 5mm")
         return v
 
+    # cq-gridfinity exclusive features
+    scoops: bool = False
+    scoop_rad: float = 11.0
+    front_label: bool = False
+    label_width: float = 12.0
+    length_div: int = 0
+    width_div: int = 0
+    lite_style: bool = False
+
+    @field_validator("scoop_rad")
+    @classmethod
+    def validate_scoop_rad(cls, v: float) -> float:
+        if v < 5 or v > 30:
+            raise ValueError("scoop radius must be between 5 and 30mm")
+        return v
+
+    @field_validator("label_width")
+    @classmethod
+    def validate_label_width(cls, v: float) -> float:
+        if v < 5 or v > 30:
+            raise ValueError("label width must be between 5 and 30mm")
+        return v
+
+    @field_validator("length_div", "width_div")
+    @classmethod
+    def validate_div(cls, v: int) -> int:
+        if v < 0 or v > 9:
+            raise ValueError("divider count must be between 0 and 9")
+        return v
+
+    @model_validator(mode="after")
+    def validate_lite_style(self) -> "BinParams":
+        if self.lite_style and (self.scoops or self.magnets or self.rim_units > 0):
+            raise ValueError("lite_style is incompatible with scoops, magnets, and rim_units")
+        return self
+
 
 class BinDefaults(BinParams):
     bed_size: float = 256.0  # mm, 0 = no splitting
@@ -172,6 +208,7 @@ class GenerateResponse(BaseModel):
     stl_url: str
     stl_urls: list[str] = []
     threemf_url: str | None = None
+    step_url: str | None = None
     split_count: int = 1
     zip_url: str | None = None
     insert_stl_url: str | None = None

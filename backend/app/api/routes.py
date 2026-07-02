@@ -68,7 +68,8 @@ from app.services.image_processor import ImageProcessor
 from app.services.ai_tracer import AITracer
 from app.services.marker_sheet import generate_marker_sheet_svg
 from app.services.polygon_scaler import PolygonScaler, ScaledPolygon, ScaledFingerHole
-from app.services.stl_generator_manifold import ManifoldSTLGenerator
+from app.services.stl_generator_cq import CQGridfinityGenerator
+from app.services.stl_generator_base import BinGenerator, GeneratorCapability
 from app.services.session_store import SessionStore
 from app.services.tool_store import ToolStore
 from app.services.bin_store import BinStore
@@ -171,7 +172,7 @@ def _get_tracer(tracer_id: str | None = None) -> AITracer:
     return _tracers[tid]
 
 polygon_scaler = PolygonScaler()
-stl_generator = ManifoldSTLGenerator()
+stl_generator: BinGenerator = CQGridfinityGenerator()
 
 
 def _rel(abs_path: str | Path, user_path: Path) -> str:
@@ -414,6 +415,7 @@ def _run_generate(
     output_path = user_path / "outputs" / f"{entity_id}.stl"
     hash_path = user_path / "outputs" / f"{entity_id}.hash"
     threemf_path = user_path / "outputs" / f"{entity_id}.3mf"
+    step_path = user_path / "outputs" / f"{entity_id}.step"
     zip_path = user_path / "outputs" / f"{entity_id}_parts.zip"
     insert_path = user_path / "outputs" / f"{entity_id}_insert.stl"
 
@@ -431,6 +433,7 @@ def _run_generate(
             stl_url=f"/storage/{user_id}/outputs/{entity_id}.stl",
             stl_urls=stl_urls,
             threemf_url=f"/storage/{user_id}/outputs/{entity_id}.3mf" if threemf_path.exists() else None,
+            step_url=f"/storage/{user_id}/outputs/{entity_id}.step" if step_path.exists() else None,
             split_count=max(1, len(stl_urls)),
             zip_url=f"/storage/{user_id}/outputs/{entity_id}_parts.zip" if zip_path.exists() else None,
             insert_stl_url=insert_stl_url,
@@ -438,12 +441,16 @@ def _run_generate(
         )
 
     threemf_path.unlink(missing_ok=True)
+    step_path.unlink(missing_ok=True)
     for old in user_path.glob(f"outputs/{entity_id}_part*.stl"):
         old.unlink(missing_ok=True)
     zip_path.unlink(missing_ok=True)
     insert_path.unlink(missing_ok=True)
 
-    bin_body, text_body = stl_generator.generate_bin(scaled, gen_req, str(output_path), str(threemf_path))
+    bin_body, text_body = stl_generator.generate_bin(
+        scaled, gen_req, str(output_path), str(threemf_path),
+        str(step_path) if stl_generator.supports(GeneratorCapability.STEP_EXPORT) else None,
+    )
 
     stl_urls: list[str] = []
     zip_url = None
@@ -493,6 +500,7 @@ def _run_generate(
         stl_url=f"/storage/{user_id}/outputs/{entity_id}.stl",
         stl_urls=stl_urls,
         threemf_url=threemf_url,
+        step_url=f"/storage/{user_id}/outputs/{entity_id}.step" if step_path.exists() else None,
         split_count=max(1, len(stl_urls)),
         zip_url=zip_url,
         insert_stl_url=insert_stl_url,
@@ -1160,6 +1168,22 @@ async def download_threemf(request: Request, session_id: str, user_id: str = Dep
         str(threemf_path),
         media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
         filename=f"tracefinity-{session_id[:8]}.3mf",
+    )
+
+
+@router.get("/files/{session_id}/bin.step")
+async def download_step(request: Request, session_id: str, user_id: str = Depends(get_user_id)):
+    user_sessions, _, _ = get_stores(user_id)
+    session = user_sessions.get(session_id)
+    if not session or not session.stl_path:
+        raise HTTPException(status_code=404, detail="step not found")
+    step_path = Path(_abs(session.stl_path)).with_suffix(".step")
+    if not step_path.exists():
+        raise HTTPException(status_code=404, detail="step not found")
+    return FileResponse(
+        str(step_path),
+        media_type="application/step",
+        filename=f"tracefinity-{session_id[:8]}.step",
     )
 
 
@@ -1937,6 +1961,22 @@ async def download_bin_threemf(request: Request, bin_id: str, user_id: str = Dep
         str(threemf_path),
         media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
         filename=f"{_bin_stem(bin_data)}.3mf",
+    )
+
+
+@router.get("/files/bins/{bin_id}/bin.step")
+async def download_bin_step(request: Request, bin_id: str, user_id: str = Depends(get_user_id)):
+    _, _, user_bins = get_stores(user_id)
+    bin_data = user_bins.get(bin_id)
+    if not bin_data or not bin_data.stl_path:
+        raise HTTPException(status_code=404, detail="step not found")
+    step_path = Path(_abs(bin_data.stl_path)).with_suffix(".step")
+    if not step_path.exists():
+        raise HTTPException(status_code=404, detail="step not found")
+    return FileResponse(
+        str(step_path),
+        media_type="application/step",
+        filename=f"{_bin_stem(bin_data)}.step",
     )
 
 

@@ -411,3 +411,7 @@ export function getBinThreemfUrl(binId: string): string {
 export function getBinInsertUrl(binId: string): string {
   return `${API_URL}/api/files/bins/${binId}/bin_insert.stl`
 }
+
+export function getBinStepUrl(binId: string): string {
+  return `${API_URL}/api/files/bins/${binId}/bin.step`
+}
